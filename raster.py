@@ -481,7 +481,7 @@ class Raster:
         return int(left), int(right)
 
     # ---------------------------------------------------------------------
-    # Channel management (NEW)
+    # Channel management
     # ---------------------------------------------------------------------
     def insert_channel(
         self,
@@ -935,7 +935,6 @@ class Raster:
         tstop: Optional[float] = None,
         channels: Optional[Sequence[ChannelId]] = None,
         inclusive_stop: bool = False,
-        return_edges: str = "left",
         dtype: np.dtype = np.dtype(np.int64),
     ) -> Tuple[np.ndarray, np.ndarray, List[ChannelId]]:
         """
@@ -961,15 +960,6 @@ class Raster:
         inclusive_stop
             If False (default), treat window as [tstart, tstop) and exclude events at
             exactly tstop. If True, include events at exactly tstop.
-        return_edges
-            Which bin times to return in addition to the count matrix:
-            - "edges": return bin edges array of shape (n_bins+1,)
-            - "left": return left edges (bin start times) of shape (n_bins,)
-            - "center": return bin centers of shape (n_bins,)
-            Note: regardless, this method *always* returns full edges as first output
-            for unambiguous downstream use. This parameter affects the *definition*
-            of the edges array returned: it is always the edges; this arg is kept for
-            API symmetry if you later add a convenience wrapper. Currently must be "edges".
         dtype
             Integer dtype for returned counts.
 
@@ -1087,12 +1077,6 @@ class Raster:
             # but we controlled inclusive_stop with nextafter when needed.
             h, _ = np.histogram(w, bins=bin_edges)
             counts[i, :] = h.astype(dtype, copy=False)
-
-        # Enforce exclusive tstop if last edge overshoots and inclusive_stop=False:
-        # Our slicing already excluded events at >= tstop; so no further action needed.
-
-        if return_edges != "edges":
-            raise ValueError("Currently, return_edges must be 'edges'. (Kept for future extension.)")
 
         return bin_edges.astype(self.dtype, copy=False), counts, ch_list
 
