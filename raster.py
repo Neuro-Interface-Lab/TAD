@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple, Union, Any
+from pathlib import Path
+
 
 import numpy as np
 import matplotlib.pyplot as plt
+import json
+
+try:
+    import h5py  # optional dependency
+except ImportError:  # pragma: no cover
+    h5py = None
+
 
 
 ChannelId = Union[int, str]
@@ -128,6 +137,238 @@ class Raster:
         for ch, arr in self.events.items():
             out.events[ch] = arr.copy()
         return out
+    
+    # ----------------------------------------------------------------------
+    # Methods for saving/loading from disk (e.g., json or HDF5)
+    # ----------------------------------------------------------------------
+    def save(
+        self,
+        path: Union[str, Path],
+        *,
+        h5: bool = True,
+        group: str = "/raster",
+        indent: int = 2,
+        compression: Union[None, str] = "gzip",
+        compression_opts: int = 4,
+        overwrite: bool = True,
+    ) -> None:
+        """
+        Save this Raster to disk in either HDF5 or JSON format.
+
+        Parameters
+        ----------
+        path
+            Output file path.
+        h5
+            If True (default), save to HDF5 using `h5py`. If False, save to JSON.
+        group
+            HDF5 group path (only used if `h5=True`).
+        indent
+            JSON indentation level (only used if `h5=False`). Use None for compact JSON.
+        compression
+            HDF5 compression (only used if `h5=True`).
+        compression_opts
+            HDF5 compression level/options (only used if `h5=True`).
+        overwrite
+            If True, overwrite the target HDF5 group if it exists (only used if `h5=True`).
+
+        Raises
+        ------
+        ImportError
+            If `h5=True` but `h5py` is not installed.
+        TypeError
+            If channel IDs are not int or str.
+        """
+        path = Path(path)
+
+        # ---------- JSON branch ----------
+        if not h5:
+            channels: List[Dict[str, Any]] = []
+            for ch, arr in self.events.items():
+                if isinstance(ch, (int, np.integer)):
+                    ch_type = "int"
+                    ch_id: Union[int, str] = int(ch)
+                elif isinstance(ch, str):
+                    ch_type = "str"
+                    ch_id = ch
+                else:
+                    raise TypeError(
+                        f"Unsupported channel id type {type(ch)} for JSON serialization. Use int or str."
+                    )
+
+                channels.append(
+                    {
+                        "id": ch_id,
+                        "type": ch_type,
+                        "times": np.asarray(arr, dtype=float).ravel().tolist(),
+                    }
+                )
+
+            payload = {
+                "schema": "Raster",
+                "version": 1,
+                "dtype": np.dtype(self.dtype).str,
+                "allow_new_channels": bool(self.allow_new_channels),
+                "channels": channels,
+            }
+            path.write_text(json.dumps(payload, indent=indent), encoding="utf-8")
+            return
+
+        # ---------- HDF5 branch ----------
+        if h5py is None:
+            raise ImportError("h5py is required for HDF5 I/O. Install with `pip install h5py`.")
+
+        with h5py.File(path, "a") as f:
+            if group in f:
+                if not overwrite:
+                    raise FileExistsError(f"Group {group!r} already exists in {str(path)!r} (overwrite=False).")
+                del f[group]
+
+            g = f.create_group(group)
+            g.attrs["schema"] = "Raster"
+            g.attrs["version"] = 1
+            g.attrs["dtype"] = np.dtype(self.dtype).str
+            g.attrs["allow_new_channels"] = bool(self.allow_new_channels)
+
+            # Preserve channel id types using two parallel datasets
+            ch_list = list(self.events.keys())
+            types: List[str] = []
+            ids_as_str: List[str] = []
+            for ch in ch_list:
+                if isinstance(ch, (int, np.integer)):
+                    types.append("int")
+                    ids_as_str.append(str(int(ch)))
+                elif isinstance(ch, str):
+                    types.append("str")
+                    ids_as_str.append(ch)
+                else:
+                    raise TypeError(f"Unsupported channel id type {type(ch)} for HDF5 serialization. Use int or str.")
+
+            dt_vlen_str = h5py.string_dtype(encoding="utf-8")
+            g.create_dataset("channel_types", data=np.asarray(types, dtype=object), dtype=dt_vlen_str)
+            g.create_dataset("channel_ids", data=np.asarray(ids_as_str, dtype=object), dtype=dt_vlen_str)
+
+            tg = g.create_group("times")
+            for i, ch in enumerate(ch_list):
+                arr = np.asarray(self.events[ch], dtype=self.dtype).ravel()
+                # keep invariant: sorted
+                if arr.size and not np.all(arr[:-1] <= arr[1:]):
+                    arr = np.sort(arr)
+
+                tg.create_dataset(
+                    name=str(i),
+                    data=arr,
+                    dtype=np.dtype(self.dtype),
+                    compression=compression,
+                    compression_opts=compression_opts if compression else None,
+                    shuffle=True if compression else False,
+                )
+
+
+    @classmethod
+    def load(
+        cls,
+        path: Union[str, Path],
+        *,
+        h5: bool = True,
+        group: str = "/raster",
+    ) -> "Raster":
+        """
+        Load a Raster from disk in either HDF5 or JSON format.
+
+        Parameters
+        ----------
+        path
+            Input file path.
+        h5
+            If True (default), load from HDF5 using `h5py`. If False, load from JSON.
+        group
+            HDF5 group path (only used if `h5=True`).
+
+        Returns
+        -------
+        Raster
+            Loaded Raster instance.
+
+        Raises
+        ------
+        ImportError
+            If `h5=True` but `h5py` is not installed.
+        ValueError
+            If schema/version are not recognized.
+        KeyError
+            If the HDF5 group does not exist.
+        """
+        path = Path(path)
+
+        # ---------- JSON branch ----------
+        if not h5:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if payload.get("schema") != "Raster":
+                raise ValueError(f"Unrecognized schema: {payload.get('schema')!r}")
+            if int(payload.get("version", -1)) != 1:
+                raise ValueError(f"Unrecognized Raster JSON version: {payload.get('version')!r}")
+
+            dtype = np.dtype(payload.get("dtype", np.dtype(np.float64).str))
+            allow_new_channels = bool(payload.get("allow_new_channels", True))
+
+            events: Dict[ChannelId, np.ndarray] = {}
+            for rec in payload.get("channels", []):
+                ty = rec.get("type")
+                cid = rec.get("id")
+                if ty == "int":
+                    ch: ChannelId = int(cid)
+                elif ty == "str":
+                    ch = str(cid)
+                else:
+                    raise ValueError(f"Unrecognized channel type in JSON: {ty!r}")
+
+                arr = np.asarray(rec.get("times", []), dtype=dtype).ravel()
+                if arr.size:
+                    arr.sort()
+                events[ch] = arr
+
+            return cls(events=events, dtype=dtype, allow_new_channels=allow_new_channels)
+
+        # ---------- HDF5 branch ----------
+        if h5py is None:
+            raise ImportError("h5py is required for HDF5 I/O. Install with `pip install h5py`.")
+
+        with h5py.File(path, "r") as f:
+            if group not in f:
+                raise KeyError(f"Group {group!r} not found in {str(path)!r}.")
+            g = f[group]
+
+            schema = g.attrs.get("schema", None)
+            version = int(g.attrs.get("version", -1))
+            if schema != "Raster":
+                raise ValueError(f"Unrecognized schema: {schema!r}")
+            if version != 1:
+                raise ValueError(f"Unrecognized Raster HDF5 version: {version!r}")
+
+            dtype = np.dtype(g.attrs.get("dtype", np.dtype(np.float64).str))
+            allow_new_channels = bool(g.attrs.get("allow_new_channels", True))
+
+            types = [t.decode("utf-8") if isinstance(t, bytes) else str(t) for t in g["channel_types"][...]]
+            ids = [x.decode("utf-8") if isinstance(x, bytes) else str(x) for x in g["channel_ids"][...]]
+
+            times_group = g["times"]
+
+            events: Dict[ChannelId, np.ndarray] = {}
+            for i, (ty, cid) in enumerate(zip(types, ids)):
+                if ty == "int":
+                    ch: ChannelId = int(cid)
+                elif ty == "str":
+                    ch = cid
+                else:
+                    raise ValueError(f"Unrecognized channel type {ty!r} in HDF5.")
+
+                arr = np.asarray(times_group[str(i)][...], dtype=dtype).ravel()
+                if arr.size:
+                    arr.sort()
+                events[ch] = arr
+
+        return cls(events=events, dtype=dtype, allow_new_channels=allow_new_channels)
 
     # ---------------------------------------------------------------------
     # Private helpers
@@ -682,6 +923,178 @@ class Raster:
             ch_ids = ch_ids[order]
 
         return times, ch_ids
+    
+    # ---------------------------------------------------------------------
+    # Binning method for metrics that require binned data (e.g., firing rates)
+    # ---------------------------------------------------------------------
+    def bin_counts(
+        self,
+        dt: float,
+        *,
+        tstart: Optional[float] = None,
+        tstop: Optional[float] = None,
+        channels: Optional[Sequence[ChannelId]] = None,
+        inclusive_stop: bool = False,
+        return_edges: str = "left",
+        dtype: np.dtype = np.dtype(np.int64),
+    ) -> Tuple[np.ndarray, np.ndarray, List[ChannelId]]:
+        """
+        Bin events into fixed-width time bins and return spike counts per channel.
+
+        This is a core primitive for downstream metrics (avalanches, binned MI/TE,
+        PSTH-like quantities, population activity, etc.).
+
+        Parameters
+        ----------
+        dt
+            Bin width (same units as timestamps). Must be positive and finite.
+        tstart
+            Start time of the binning window. If None, inferred as the global
+            minimum event time across selected channels (or 0.0 if no events).
+        tstop
+            Stop time of the binning window. If None, inferred as the global
+            maximum event time across selected channels (or tstart + dt if no events).
+        channels
+            Subset/order of channels to bin. If None, uses all channels in this raster.
+            The returned count matrix row order follows this list (after optional sorting
+            if you pass a sorted list yourself).
+        inclusive_stop
+            If False (default), treat window as [tstart, tstop) and exclude events at
+            exactly tstop. If True, include events at exactly tstop.
+        return_edges
+            Which bin times to return in addition to the count matrix:
+            - "edges": return bin edges array of shape (n_bins+1,)
+            - "left": return left edges (bin start times) of shape (n_bins,)
+            - "center": return bin centers of shape (n_bins,)
+            Note: regardless, this method *always* returns full edges as first output
+            for unambiguous downstream use. This parameter affects the *definition*
+            of the edges array returned: it is always the edges; this arg is kept for
+            API symmetry if you later add a convenience wrapper. Currently must be "edges".
+        dtype
+            Integer dtype for returned counts.
+
+        Returns
+        -------
+        bin_edges : ndarray, shape (n_bins + 1,)
+            Bin edge times spanning the window.
+        counts : ndarray, shape (n_channels, n_bins)
+            Spike counts per channel per bin.
+        ch_list : list
+            Channel IDs corresponding to rows of `counts`.
+
+        Raises
+        ------
+        ValueError
+            If `dt` is not positive/finite, or if window bounds are invalid.
+
+        Notes
+        -----
+        - Bins are constructed as consecutive intervals of width `dt` starting at `tstart`.
+        - If `inclusive_stop=False`, an event at exactly `tstop` is excluded.
+        If True, it is included by nudging the histogram right edge.
+        - Uses `np.searchsorted`-based histogramming per channel for correctness
+        and speed on sorted spike times.
+        """
+        # ---- validate dt ----
+        dt_f = float(dt)
+        if not np.isfinite(dt_f) or dt_f <= 0.0:
+            raise ValueError(f"dt must be positive and finite, got {dt!r}.")
+
+        # ---- choose channels ----
+        ch_list = list(channels) if channels is not None else self.channels()
+
+        # Ensure channels exist (and do not create new ones silently if allow_new_channels=False)
+        for ch in ch_list:
+            self._require_channel(ch)
+
+        # ---- infer window if needed ----
+        # Collect min/max across selected channels
+        mins = []
+        maxs = []
+        for ch in ch_list:
+            arr = self.events[ch]
+            if arr.size:
+                mins.append(arr[0])
+                maxs.append(arr[-1])
+
+        if tstart is None:
+            tstart_f = float(np.min(mins)) if mins else 0.0
+        else:
+            tstart_f = self._validate_time(tstart)
+
+        if tstop is None:
+            if maxs:
+                tstop_f = float(np.max(maxs))
+            else:
+                tstop_f = tstart_f + dt_f
+        else:
+            tstop_f = self._validate_time(tstop)
+
+        if tstop_f < tstart_f:
+            raise ValueError(f"tstop ({tstop_f}) must be >= tstart ({tstart_f}).")
+
+        # If the window length is 0, return an empty binning (0 bins)
+        length = tstop_f - tstart_f
+        if length == 0.0:
+            bin_edges = np.asarray([tstart_f], dtype=self.dtype)
+            counts = np.zeros((len(ch_list), 0), dtype=dtype)
+            return bin_edges, counts, ch_list
+
+        # ---- build bin edges ----
+        # Number of full bins that cover [tstart, tstop) or [tstart, tstop]
+        # We want edges = tstart + k*dt for k=0..n_bins
+        n_bins = int(np.ceil(length / dt_f))
+        bin_edges = tstart_f + dt_f * np.arange(n_bins + 1, dtype=float)
+
+        # Ensure last edge reaches or exceeds tstop; ceil ensures it.
+        # For inclusive_stop, include events exactly at tstop by pushing right edge slightly if needed.
+        if inclusive_stop:
+            # Make sure tstop is inside the rightmost edge, and count events at exactly tstop.
+            # Using nextafter avoids altering bins beyond floating precision necessities.
+            if tstop_f == bin_edges[-1]:
+                bin_edges[-1] = np.nextafter(bin_edges[-1], np.inf)
+            else:
+                # If tstop falls before the last edge, still include it naturally.
+                pass
+        else:
+            # Exclude tstop exactly: if last edge equals tstop, histogram excludes right edge by default.
+            # If last edge > tstop, events at exactly tstop are still excluded due to being < last_edge,
+            # but they might be counted if tstop < last_edge. So we explicitly treat tstop as the limit
+            # by masking events >= tstop later.
+            pass
+
+        # ---- count per channel ----
+        counts = np.zeros((len(ch_list), n_bins), dtype=dtype)
+
+        for i, ch in enumerate(ch_list):
+            arr = self.events[ch]
+            if arr.size == 0:
+                continue
+
+            # Apply window restriction efficiently on sorted arrays
+            left = np.searchsorted(arr, tstart_f, side="left")
+            if inclusive_stop:
+                right = np.searchsorted(arr, tstop_f, side="right")
+            else:
+                right = np.searchsorted(arr, tstop_f, side="left")
+            w = arr[left:right]
+
+            if w.size == 0:
+                continue
+
+            # Histogram against bin edges
+            # np.histogram uses bins as [edge_j, edge_{j+1}) except last which is [..] (implementation detail),
+            # but we controlled inclusive_stop with nextafter when needed.
+            h, _ = np.histogram(w, bins=bin_edges)
+            counts[i, :] = h.astype(dtype, copy=False)
+
+        # Enforce exclusive tstop if last edge overshoots and inclusive_stop=False:
+        # Our slicing already excluded events at >= tstop; so no further action needed.
+
+        if return_edges != "edges":
+            raise ValueError("Currently, return_edges must be 'edges'. (Kept for future extension.)")
+
+        return bin_edges.astype(self.dtype, copy=False), counts, ch_list
 
     # ---------------------------------------------------------------------
     # Visualization
