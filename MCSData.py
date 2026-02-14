@@ -1,6 +1,8 @@
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.widgets import CheckButtons
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import spikeinterface.extractors as se
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
@@ -33,10 +35,15 @@ class MCSData:
         self.probe = define_MCS_probe()
         self.fsample = fsample
         self.time_vector = None
+        self.mask = None
+        self.ch_ids = None
+        self.electrode_labels = None
         if load_recording:
             self.__load_recording()
             self.time_vector = np.arange(self.recording.get_total_samples()) / self.fsample
-
+            self.ch_ids = self.recording.channel_ids
+            self.electrode_labels = self.recording.get_property('electrode_labels')
+            self.mask = np.ones(self.recording.get_num_channels(), dtype=bool)
 
     def __load_recording(self):
         """
@@ -51,6 +58,16 @@ class MCSData:
         self.recording = self.recording.rename_channels([f"Ch{lab}" for lab in electrode_labels])
         if self.fsample is None:
             self.fsample = self.recording.get_sampling_frequency()
+        return 1
+    
+    ### basic methods
+    def set_mask(self, mask):
+        """
+        Sets the channel mask for analysis.
+        """
+        if len(mask) != self.recording.get_num_channels():
+            raise ValueError("Mask length must match number of channels.")
+        self.mask = mask
         return 1
 
     ### processing methods
@@ -89,3 +106,121 @@ class MCSData:
         ax.set_ylabel('Channel Index')
         ax.set_title('Spike Raster Plot')
         return 1
+    
+    """
+    def chose_mask(self, tmin=0, tmax=10):
+        fig, axes = plt.subplots(8, 8, figsize=(8, 8))
+        plt.subplots_adjust(wspace=0.1, hspace=0.1)
+
+        # limpa tudo
+        for ax in axes.flat:
+             ax.axis("off")
+
+        for ch, lab in zip(self.ch_ids, self.electrode_labels):
+            lab = int(lab)
+            col = lab // 10 - 1   # coluna 0–7
+            row = lab % 10 - 1    # linha 0–7
+            ax = axes[row,col]
+            traces = self.recording.get_traces(start_frame = tmin*self.fsample , end_frame = tmax*self.fsample, channel_ids = [ch], return_in_uV = True)
+            local_time_vector = np.arange(traces.shape[0]) / self.fsample + tmin
+            ax.plot(local_time_vector, traces)
+            #ax.text(0.5, 0.5, ch, ha="center", va="center", fontsize=7)
+            ax.set_title(lab, fontsize=6)
+            ax.set_xlim(0, 10)
+            ax.set_ylim(-50, 50)
+            ax.axis("off")
+
+
+        plt.show()
+    """
+    def chose_mask(self, tmin=0, tmax=10):
+        """
+        Opens a GUI to choose which channels to include in the analysis.
+        Returns a boolean mask aligned with self.ch_ids (True = keep, False = exclude).
+        """
+        fig, axes = plt.subplots(8, 8, figsize=(8, 8))
+        plt.subplots_adjust(wspace=0.1, hspace=0.1)
+
+        # turn everything off first
+        for ax in axes.flat:
+            ax.axis("off")
+
+        n = len(self.ch_ids)
+        mask = np.ones(n, dtype=bool)
+        lines = [None] * n
+        checks = [None] * n
+
+        def make_toggle(i):
+            def _toggle(_label):
+                mask[i] = not mask[i]
+
+                ln = lines[i]
+                if ln is not None:
+                    ln.set_color("C0" if mask[i] else "0.7")
+
+                cb = checks[i]
+                if cb is not None:
+                    # Light tint when unchecked
+                    try:
+                        cb.rectangles[0].set_facecolor("white" if mask[i] else "0.9")
+                    except Exception:
+                        pass
+
+                fig.canvas.draw_idle()
+            return _toggle
+
+        for i, (ch, lab) in enumerate(zip(self.ch_ids, self.electrode_labels)):
+            lab = int(lab)
+            col = lab // 10 - 1   # col 0–7
+            row = lab % 10 - 1    # row 0–7
+            ax = axes[row, col]
+
+            traces = self.recording.get_traces(
+                start_frame=int(tmin * self.fsample),
+                end_frame=int(tmax * self.fsample),
+                channel_ids=[ch],
+                return_in_uV=True
+            )
+            local_time_vector = np.arange(traces.shape[0]) / self.fsample + tmin
+
+            ln, = ax.plot(local_time_vector, traces, lw=0.8, color="C0")
+            lines[i] = ln
+
+            ax.set_title(lab, fontsize=6)
+            ax.set_xlim(tmin, tmax)
+            ax.set_ylim(-50, 50)
+            ax.axis("off")
+
+            # Tiny checkbox inside the subplot (figure-relative coordinates)
+            bbox = ax.get_position()
+            w = bbox.width * 0.18
+            h = bbox.height * 0.18
+            x0 = bbox.x0 + bbox.width * 0.02
+            y0 = bbox.y1 - h - bbox.height * 0.02
+            cax = fig.add_axes([x0, y0, w, h])
+            cax.set_xticks([])
+            cax.set_yticks([])
+            for spine in cax.spines.values():
+                spine.set_visible(False)
+
+            cb = CheckButtons(cax, labels=[""], actives=[True])
+
+            # Hide the label text (keep widget clickable)
+            for txt in getattr(cb, "labels", []):
+                txt.set_visible(False)
+
+            # Some matplotlib versions use `lines`, others `lines_` (or neither); handle safely.
+            line_groups = getattr(cb, "lines", None) or getattr(cb, "lines_", None)
+            if line_groups is not None:
+                for pair in line_groups:  # each entry is typically a (line1, line2) tuple
+                    try:
+                        pair[0].set_linewidth(1.0)
+                        pair[1].set_linewidth(1.0)
+                    except Exception:
+                        pass
+
+            cb.on_clicked(make_toggle(i))
+            checks[i] = cb
+
+        plt.show()
+        self.mask = mask
