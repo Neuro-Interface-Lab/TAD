@@ -8,6 +8,7 @@ from .scalar import (
 from .avalanches import extract_avalanches, AvalancheResult
 from .rates import firing_rate_curve, FiringRateCurveResult
 from .powerlaw import fit_avalanche_powerlaw, PowerLawFitResult
+from .synchrony import PearsonSynchronyResult, pearson_corr_firing_rate
 
 __all__ = [
     "spike_count",
@@ -21,4 +22,6 @@ __all__ = [
     "FiringRateCurveResult",
     "fit_avalanche_powerlaw",
     "PowerLawFitResult",
+    "PearsonSynchronyResult",
+    "pearson_corr_firing_rate",
 ]
