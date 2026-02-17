@@ -38,12 +38,14 @@ class MCSData:
         self.mask = None
         self.ch_ids = None
         self.electrode_labels = None
+        self.temporal_mask = None
         if load_recording:
             self.__load_recording()
             self.time_vector = np.arange(self.recording.get_total_samples()) / self.fsample
             self.ch_ids = self.recording.channel_ids
             self.electrode_labels = self.recording.get_property('electrode_labels')
             self.mask = np.ones(self.recording.get_num_channels(), dtype=bool)
+            self.temporal_mask = np.ones_like(self.time_vector, dtype=bool)
 
     def __load_recording(self):
         """
@@ -224,3 +226,37 @@ class MCSData:
 
         plt.show()
         self.mask = mask
+
+    def blank_period(self, tstart, tstop):
+        """
+        Blanks out (excludes) the specified time periods from analysis.
+        """
+        if self.time_vector is None:
+            raise ValueError("Time vector not initialized.")
+        if tstart >= tstop:
+            raise ValueError("tstart must be less than tstop.")
+        
+        mask = (self.time_vector < tstart) | (self.time_vector > tstop)
+        self.temporal_mask &= mask
+
+    def get_raster(self, tstart=None, tstop=None):
+        """
+        Returns a Raster object containing the spike times for the selected channels.
+        """
+        if self.peaks is None:
+            raise ValueError("Spikes not detected.")
+        if tstart is None:
+            tstart = self.time_vector[0]
+        if tstop is None:
+            tstop = self.time_vector[-1]
+
+        from .raster import Raster  # avoid circular import
+        r = Raster.empty(channels=self.ch_ids[self.mask])
+
+        peaks_sc = np.column_stack((self.peaks['sample_index'], self.peaks['channel_index']))
+        for k, ch in enumerate(self.ch_ids[self.mask]):
+            # r.insert_channel(ch)
+            this_channel_times = peaks_sc[peaks_sc[:, 1] == k][:, 0] / self.fsample
+            keep_spikes = (this_channel_times >= tstart) & (this_channel_times <= tstop) & self.temporal_mask[(this_channel_times * self.fsample).astype(int)]
+            r.insert_timestamparray(ch, this_channel_times[keep_spikes], assume_sorted=True)
+        return r
