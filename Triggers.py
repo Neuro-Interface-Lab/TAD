@@ -3,7 +3,7 @@ from typing import List, Optional, Sequence
 
 import json
 
-def load_triggers_from_json(filepath: str) -> Triggers:
+def load_triggers_from_json(filepath: str) -> 'Triggers':
     """
     Load triggers from a JSON file.
 
@@ -42,6 +42,7 @@ class TimeSlot:
     end: float
     ID: Optional[int] = None  # Optional identifier for the slot
     description: Optional[str] = None  # Optional description for the slot
+    blank: Optional[bool] = False # Optional flag to indicate if the slot should be blanked out in the analysis (e.g., for artifact removal)
 
     def duration(self) -> float:
         """

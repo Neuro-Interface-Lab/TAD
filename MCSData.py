@@ -19,6 +19,7 @@ class MCSData:
                  fname,
                  fsample=None,
                  load_recording=True,
+                 load_digital = False
                  ):
         """
         Opens an MCS .h5 file and prepares it for analysis.
@@ -40,6 +41,8 @@ class MCSData:
         self.electrode_labels = None
         self.temporal_mask = None
         self.triggers = None
+        self.digital_recording = None
+        self.load_digital = load_digital
         if load_recording:
             self.__load_recording()
             self.time_vector = np.arange(self.recording.get_total_samples()) / self.fsample
@@ -57,6 +60,13 @@ class MCSData:
         except Exception as e:
             print(f"Error loading recording: {e}")
             sys.exit(1)
+        if self.load_digital:
+            try:
+                with h5py.File(self.fname, "r") as f:
+                    stream = f["Data/Recording_0/AnalogStream/Stream_0/ChannelData"]
+                    self.digital_recording = stream[0]
+            except Exception as e:
+                print(f"Error loading digital recording: {e}")
         electrode_labels = self.recording.get_property('electrode_labels')
         self.recording = self.recording.rename_channels([f"Ch{lab}" for lab in electrode_labels])
         if self.fsample is None:
@@ -249,6 +259,7 @@ class MCSData:
 
         from .Triggers import Triggers  # avoid circular import
         self.triggers = Triggers()
+
 
         # for ... :
         #     self.triggers.add_timed_slot(...)
