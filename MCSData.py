@@ -39,6 +39,7 @@ class MCSData:
         self.ch_ids = None
         self.electrode_labels = None
         self.temporal_mask = None
+        self.triggers = None
         if load_recording:
             self.__load_recording()
             self.time_vector = np.arange(self.recording.get_total_samples()) / self.fsample
@@ -238,6 +239,23 @@ class MCSData:
         
         mask = (self.time_vector < tstart) | (self.time_vector > tstop)
         self.temporal_mask &= mask
+    
+    def get_triggers(self, tstart=None, tstop=None):
+
+        if tstart is None:
+            tstart = self.time_vector[0]
+        if tstop is None:
+            tstop = self.time_vector[-1]
+
+        from .Triggers import Triggers  # avoid circular import
+        self.triggers = Triggers()
+
+        # for ... :
+        #     self.triggers.add_timed_slot(...)
+        #     self.triggers.add_interval_slot(...)
+        
+        return self.triggers
+        
 
     def get_raster(self, tstart=None, tstop=None):
         """
