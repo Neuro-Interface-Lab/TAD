@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import CheckButtons
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from typing import List, Optional
 import spikeinterface.extractors as se
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
@@ -248,9 +249,31 @@ class MCSData:
             raise ValueError("tstart must be less than tstop.")
         
         mask = (self.time_vector < tstart) | (self.time_vector > tstop)
+        print(mask)
         self.temporal_mask &= mask
+
+    def convert_digital(self):
+        a = self.digital_recording[0]
+        self.digital_recording = np.log2(np.abs(self.digital_recording - a + 1))
+        self.digital_recording[self.digital_recording > 2] = 0
+        self.digital_recording = np.asarray(self.digital_recording, dtype=np.int32)
+        return self.digital_recording
+
+    def detect_digital_rising_edge(self):
+        edges = []
+        for i in range(1, len(self.digital_recording)):
+            if self.digital_recording[i] > self.digital_recording[i-1]:
+                edges.append(i)
+        return edges
     
-    def get_triggers(self, tstart=None, tstop=None):
+    def detect_digital_falling_edge(self):
+        edges = []
+        for i in range(1, len(self.digital_recording)):
+            if self.digital_recording[i] < self.digital_recording[i-1]:
+                edges.append(i)
+        return edges
+    
+    def get_triggers(self, tstart=None, tstop=None, interpretor=None, dt_after_trigger: Optional[float] =  None):
 
         if tstart is None:
             tstart = self.time_vector[0]
@@ -258,13 +281,25 @@ class MCSData:
             tstop = self.time_vector[-1]
 
         from .Triggers import Triggers  # avoid circular import
-        self.triggers = Triggers()
 
-
-        # for ... :
-        #     self.triggers.add_timed_slot(...)
-        #     self.triggers.add_interval_slot(...)
+        self.triggers = Triggers(slots=[])
         
+        self.digital_recording = self.digital_recording[(self.time_vector >= tstart) & (self.time_vector <= tstop)]
+        self.digital_recording = self.convert_digital()
+        if interpretor is None:
+            # treat each rising as the start of a time slot and each falling as the end of a time slot:
+            rising_edges = self.detect_digital_rising_edge()
+            falling_edges = self.detect_digital_falling_edge()
+            for start, end in zip(rising_edges, falling_edges):
+                self.triggers.add_interval_slot(start=start/self.fsample, end = end / self.fsample)
+        elif callable(interpretor):
+            if dt_after_trigger is None:
+                interpretor(self.digital_recording, self.triggers, self.fsample)
+            else:
+                interpretor(self.digital_recording, self.triggers, self.fsample, dt_after_trigger)
+        else:
+            raise ValueError("interpretor must be a callable function that defines how to interpret the digital signal into triggers.")
+
         return self.triggers
         
 

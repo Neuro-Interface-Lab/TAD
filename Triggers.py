@@ -37,12 +37,18 @@ class TimeSlot:
         Start time of the slot.
     end
         End time of the slot.
+    ID 
+        Optional identifier for the slot
+    description
+        Optional description for the slot
+    blank
+        Optional flag to indicate if the slot should be blanked out in the analysis (e.g., for artifact removal)
     """
     start: float
     end: float
-    ID: Optional[int] = None  # Optional identifier for the slot
-    description: Optional[str] = None  # Optional description for the slot
-    blank: Optional[bool] = False # Optional flag to indicate if the slot should be blanked out in the analysis (e.g., for artifact removal)
+    ID: Optional[int] = None 
+    description: Optional[str] = None 
+    blank: Optional[bool] = False 
 
     def duration(self) -> float:
         """
@@ -61,7 +67,7 @@ class TimeSlot:
         return False
     
     def __str__(self) -> str:
-        return f"TimeSlot(start={self.start}, end={self.end}, ID={self.ID}, description={self.description})"
+        return f"TimeSlot(start={self.start}, end={self.end}, ID={self.ID}, description={self.description}, blank = {self.blank})"
     
     def __repr__(self) -> str:
         return self.__str__()
@@ -78,7 +84,7 @@ class Triggers:
     """
     slots: List[TimeSlot]
 
-    def add_timed_slot(self, tstart:float, duration:float, ID: Optional[int] = None, description: Optional[str] = None) -> None:
+    def add_timed_slot(self, tstart:float, duration:float, ID: Optional[int] = None, description: Optional[str] = None, blank: Optional[bool] = False) -> None:
         """
         Add a new time slot to the triggers.
 
@@ -92,11 +98,13 @@ class Triggers:
             Optional identifier for the new slot.
         description
             Optional description for the new slot.
+        blank
+            Optional flag to indicate if the slot should be blanked out in the analysis (e.g., for artifact removal).
         """
-        new_slot = TimeSlot(start=tstart, end=tstart+duration, ID=ID, description=description)
+        new_slot = TimeSlot(start=tstart, end=tstart+duration, ID=ID, description=description, blank = blank)
         self.slots.append(new_slot)
 
-    def add_interval_slot(self, start:float, end:float, ID: Optional[int] = None, description: Optional[str] = None) -> None:
+    def add_interval_slot(self, start:float, end:float, ID: Optional[int] = None, description: Optional[str] = None, blank: Optional[bool] = False) -> None:
         """
         Add a new time slot to the triggers.
 
@@ -110,8 +118,10 @@ class Triggers:
             Optional identifier for the new slot.
         description
             Optional description for the new slot.
+        blank
+            Optional flag to indicate if the slot should be blanked out in the analysis (e.g., for artifact removal).
         """
-        new_slot = TimeSlot(start=start, end=end, ID=ID, description=description)
+        new_slot = TimeSlot(start=start, end=end, ID=ID, description=description, blank = blank)
         self.slots.append(new_slot)
 
     def __str__(self) -> str:
