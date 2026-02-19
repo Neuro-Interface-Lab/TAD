@@ -88,6 +88,21 @@ class MCSData:
         self.mask = mask
         return 1
     
+    def apply_filter(self, bandpass=None, btype = 'bandpass'):
+        """
+        Applies a filter to the recording
+        bandpass: array of [low_freq, high_freq] for bandpass, or single value for highpass
+        btype: 'bandpass' or 'highpass'
+        """
+        if self.recording is None:
+            raise ValueError("Recording not loaded.")
+        if bandpass is None:
+            raise ValueError("Bandpass frequencies must be provided.")
+        if filter is None or not callable(filter):
+            raise ValueError("Filter must be a callable function.")
+        self.recording = pre.filter(self.recording, band=bandpass, btype=btype)
+        return self.recording
+    
     ### get traces
     def get_traces(self, tstart=None, tstop=None, channel_ids=None, return_in_uV=True):
         """
@@ -354,7 +369,6 @@ class MCSData:
         list_triggers = []
         for slot in self.triggers.slots:
             list_triggers.append(int(slot.start*self.fsample))
-            print(slot.start)
         self.recording = pre.remove_artifacts(self.recording, 
                             list_triggers = list_triggers, # remove one trigger at a time
                             ms_before = ms_before, # remove 100 ms before trigger
