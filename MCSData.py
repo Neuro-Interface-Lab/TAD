@@ -4,7 +4,9 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import CheckButtons
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from typing import List, Optional
+import spikeinterface.widgets as sw
 import spikeinterface.extractors as se
+import spikeinterface.preprocessing as pre
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
 import os
@@ -42,7 +44,9 @@ class MCSData:
         self.electrode_labels = None
         self.temporal_mask = None
         self.triggers = None
+        self.artifact_removal_status = False
         self.digital_recording = None
+        self.traces = None
         self.load_digital = load_digital
         if load_recording:
             self.__load_recording()
@@ -83,6 +87,44 @@ class MCSData:
             raise ValueError("Mask length must match number of channels.")
         self.mask = mask
         return 1
+    
+    ### get traces
+    def get_traces(self, tstart=None, tstop=None, channel_ids=None, return_in_uV=True):
+        """
+        Retrieves traces for the specified time range and channels.
+        """
+        if self.recording is None:
+            raise ValueError("Recording not loaded.")
+        if tstart is None:
+            tstart = self.time_vector[0]
+        if tstop is None:
+            tstop = self.time_vector[-1]
+        if channel_ids is None:
+            channel_ids = self.ch_ids[self.mask]
+        
+        start_frame = int(tstart * self.fsample)
+        end_frame = int(tstop * self.fsample)
+        
+        self.traces = self.recording.get_traces(start_frame=start_frame, end_frame=end_frame, channel_ids=channel_ids, return_in_uV=return_in_uV)
+        
+        return self.traces
+    
+    def plot_traces(self, tstart=None, tstop=None, channel_ids=None):
+        """
+        Plots the traces for the specified time range and channels.
+        """
+        if channel_ids is None:
+            channel_ids = self.ch_ids[self.mask]
+        if tstart is None:
+            tstart = self.time_vector[0]
+        if tstop is None:
+            tstop = self.time_vector[-1]
+        if self.traces is None:
+            self.get_traces(tstart=tstart, tstop=tstop, channel_ids=channel_ids)
+        sw.plot_traces(self.recording, channel_ids=channel_ids, time_range=(tstart,tstop))
+        plt.show()
+
+
 
     ### processing methods
     def detect_spikes(self,
@@ -147,7 +189,7 @@ class MCSData:
 
         plt.show()
     """
-    def chose_mask(self, tmin=0, tmax=10):
+    def choose_mask(self, tmin=0, tmax=10):
         """
         Opens a GUI to choose which channels to include in the analysis.
         Returns a boolean mask aligned with self.ch_ids (True = keep, False = exclude).
@@ -249,7 +291,6 @@ class MCSData:
             raise ValueError("tstart must be less than tstop.")
         
         mask = (self.time_vector < tstart) | (self.time_vector > tstop)
-        print(mask)
         self.temporal_mask &= mask
 
     def convert_digital(self):
@@ -291,7 +332,7 @@ class MCSData:
             rising_edges = self.detect_digital_rising_edge()
             falling_edges = self.detect_digital_falling_edge()
             for start, end in zip(rising_edges, falling_edges):
-                self.triggers.add_interval_slot(start=start/self.fsample, end = end / self.fsample)
+                self.triggers.add_interval_slot(start=round(start*self.fsample)/self.fsample, end = round(end*self.fsample) / self.fsample)
         elif callable(interpretor):
             if dt_after_trigger is None:
                 interpretor(self.digital_recording, self.triggers, self.fsample)
@@ -299,9 +340,28 @@ class MCSData:
                 interpretor(self.digital_recording, self.triggers, self.fsample, dt_after_trigger)
         else:
             raise ValueError("interpretor must be a callable function that defines how to interpret the digital signal into triggers.")
-
         return self.triggers
-        
+
+    def remove_artifacts_from_trigger(self,
+                                      ms_before = 0.1,
+                                      ms_after = 0.4,
+                                      mode = "zeros"
+                                      ):
+        if self.artifact_removal_status:
+            raise ValueError("Artifact removal already performed.")
+        if self.triggers is None:
+            raise ValueError("Triggers not defined. Run get_triggers() first.")
+        list_triggers = []
+        for slot in self.triggers.slots:
+            list_triggers.append(int(slot.start*self.fsample))
+            print(slot.start)
+        self.recording = pre.remove_artifacts(self.recording, 
+                            list_triggers = list_triggers, # remove one trigger at a time
+                            ms_before = ms_before, # remove 100 ms before trigger
+                            ms_after = ms_after, # remove duration of trigger (in ms) + 3ms to account for filter time constant.
+                            mode = mode) # mode usually set to zero
+        self.artifact_removal_status = True
+        return self.recording
 
     def get_raster(self, tstart=None, tstop=None):
         """
@@ -319,7 +379,6 @@ class MCSData:
 
         peaks_sc = np.column_stack((self.peaks['sample_index'], self.peaks['channel_index']))
         for k, ch in enumerate(self.ch_ids[self.mask]):
-            # r.insert_channel(ch)
             this_channel_times = peaks_sc[peaks_sc[:, 1] == k][:, 0] / self.fsample
             keep_spikes = (this_channel_times >= tstart) & (this_channel_times <= tstop) & self.temporal_mask[(this_channel_times * self.fsample).astype(int)]
             r.insert_timestamparray(ch, this_channel_times[keep_spikes], assume_sorted=True)
