@@ -22,7 +22,9 @@ class MCSData:
                  fname,
                  fsample=None,
                  load_recording=True,
-                 load_digital = False
+                 load_digital = False,
+                 generate_probe = False,
+                 probe_data: Optional[dict] = None
                  ):
         """
         Opens an MCS .h5 file and prepares it for analysis.
@@ -36,7 +38,11 @@ class MCSData:
         self.fname = fname  
         self.recording = None
         self.peaks = None
-        self.probe = define_MCS_probe()
+        self.probe = None  
+        self.probe_positions = None
+        self.probe_contact_shape = None
+        self.probe_shape_params = None
+        self.probe_ndims = None
         self.fsample = fsample
         self.time_vector = None
         self.mask = None
@@ -55,6 +61,8 @@ class MCSData:
             self.electrode_labels = self.recording.get_property('electrode_labels')
             self.mask = np.ones(self.recording.get_num_channels(), dtype=bool)
             self.temporal_mask = np.ones_like(self.time_vector, dtype=bool)
+        if generate_probe:
+            self.__generate_probe(probe_data)
 
     def __load_recording(self):
         """
@@ -77,6 +85,19 @@ class MCSData:
         if self.fsample is None:
             self.fsample = self.recording.get_sampling_frequency()
         return 1
+    
+    def __generate_probe(self, probe_data):
+        from .mea_probe import MEAProbe  # avoid circular import
+
+        if probe_data is None:
+            print("probe_data was not provided, implementing 60MEA100/10iR geometry")
+            # to be implemented here!!!
+        else:
+            self.probe_positions = probe_data.get("positions")
+            self.probe_contact_shape = probe_data.get("contact_shape")
+            self.probe_shape_params = probe_data.get("shape_params")
+            self.probe_ndims = probe_data.get("ndims")
+            self.probe = MEAProbe(self.probe_positions, self.probe_contact_shape, self.probe_shape_params, self.probe_ndims)
     
     ### basic methods
     def set_mask(self, mask):
