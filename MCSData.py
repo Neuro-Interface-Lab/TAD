@@ -14,16 +14,17 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Callable, Optional
-
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import spikeinterface.extractors as se
 import spikeinterface.preprocessing as pre
 import spikeinterface.widgets as sw
+
+from typing import Any, Callable, Dict, Optional
 from matplotlib.widgets import CheckButtons
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
+from .processing_history import DatasetInfo, ProcessingHistory
 
 
 def on_delta_t(digital_recording, triggers, fsample: float, delta_t: float) -> None:
@@ -84,6 +85,82 @@ def on_off_interpretor(digital_recording, triggers, fsample: float) -> None:
             ID="stim_ON",
             blank=False,
         )
+
+def tracked_operation(
+    name: Optional[str] = None,
+    *,
+    track: bool = True,
+    include_result_artifacts: Optional[Callable[[Any], Dict[str, Any]]] = None,
+) -> Callable:
+    """
+    Decorator to record a method call into `self.history`.
+
+    Parameters
+    ----------
+    name : str, optional
+        Operation name. Defaults to function name.
+    track : bool, default=True
+        Whether to track this operation.
+    include_result_artifacts : callable, optional
+        Function called with the method return value; must return JSON-friendly dict
+        to attach as `artifacts`.
+    """
+    def _decorator(func: Callable) -> Callable:
+        op_name = name or func.__name__
+
+        def _wrapped(self, *args, **kwargs):
+            if (not track) or (getattr(self, "history", None) is None):
+                return func(self, *args, **kwargs)
+
+            before_snapshot = self.history.snapshot_state()
+            before_hash = self.history.state_hash(before_snapshot)
+
+            result = func(self, *args, **kwargs)
+
+            after_snapshot = self.history.snapshot_state()
+            after_hash = self.history.state_hash(after_snapshot)
+
+            # Capture parameters in a conservative, explicit way
+            params = {"args": args, "kwargs": kwargs}
+
+            artifacts = {}
+            if include_result_artifacts is not None:
+                try:
+                    artifacts = include_result_artifacts(result) or {}
+                except Exception:
+                    artifacts = {"note": "artifact extraction failed"}
+
+            # Optional summary can be derived from after_snapshot if desired
+            summary = {
+                "mask_n_kept": int(after_snapshot.get("mask_n_kept", -1)) if isinstance(after_snapshot, dict) else -1,
+                "excluded_intervals_n": int(after_snapshot.get("excluded_intervals_n", -1)) if isinstance(after_snapshot, dict) else -1,
+            }
+
+            self.history.record(
+                op_name,
+                params=params,
+                state_before=before_hash,
+                state_after=after_hash,
+                summary=summary,
+                artifacts=artifacts,
+            )
+            return result
+
+        _wrapped.__name__ = func.__name__
+        _wrapped.__doc__ = func.__doc__
+        _wrapped.__qualname__ = func.__qualname__
+        return _wrapped
+
+    return _decorator
+
+def _raster_artifacts(r) -> Dict[str, Any]:
+    # Best-effort, does not assume Raster internals
+    artifacts = {}
+    try:
+        artifacts["raster_channels_n"] = int(len(getattr(r, "channels", [])))  # if exists
+    except Exception:
+        pass
+    return artifacts
 
 
 class MCSData:
@@ -147,6 +224,7 @@ class MCSData:
         # Time/selection masks
         self.time_vector: Optional[np.ndarray] = None
         self.temporal_mask: Optional[np.ndarray] = None
+        self.excluded_intervals = []  
 
         # Digital/triggers
         self.digital_recording = None
@@ -165,6 +243,60 @@ class MCSData:
 
         if generate_probe:
             self._generate_probe(probe_data)
+        
+        # Initialize history,to record metadata
+        if load_recording and self.recording is not None:
+            ds = DatasetInfo.from_path(
+                fname=self.fname,
+                sampling_frequency=float(self.fsample) if self.fsample is not None else None,
+                stream_id=1,
+                channel_ids=list(self.ch_ids) if self.ch_ids is not None else None,
+                electrode_labels=list(self.electrode_labels) if self.electrode_labels is not None else None,
+            )
+            self.history = ProcessingHistory(dataset=ds)
+            self.history.set_state_getter(self._history_snapshot)  # NEW callback
+        else:
+            self.history = None
+
+    # ----------------------------- History handling -----------------------
+    def _history_snapshot(self) -> Dict[str, Any]:
+        """
+        Create a JSON-friendly snapshot of relevant processing state (C).
+
+        Returns
+        -------
+        dict
+            Snapshot dict suitable for hashing and JSON serialization.
+        """
+        snap: Dict[str, Any] = {
+            "fname": self.fname,
+            "sampling_frequency": float(self.fsample) if self.fsample is not None else None,
+        }
+
+        # Channel mask summary + compact representation (store list of kept channel ids)
+        if self.mask is not None and self.ch_ids is not None:
+            kept = list(self.ch_ids[self.mask])
+            snap["mask_n_kept"] = int(len(kept))
+            snap["mask_kept_channel_ids"] = kept
+
+        # Temporal exclusions: store intervals list rather than full per-sample boolean
+        snap["excluded_intervals"] = list(self.excluded_intervals) if hasattr(self, "excluded_intervals") else []
+        snap["excluded_intervals_n"] = int(len(snap["excluded_intervals"]))
+
+        # Trigger summary (store the slots, not the digital signal)
+        if self.triggers is not None and hasattr(self.triggers, "slots"):
+            snap["triggers"] = [
+                {"start": float(s.start), "end": float(s.end), "id": getattr(s, "ID", None), "blank": getattr(s, "blank", None)}
+                for s in self.triggers.slots
+            ]
+            snap["triggers_n"] = int(len(snap["triggers"]))
+
+        # Note: filter parameters are not explicitly stored by SpikeInterface here;
+        # you can store them at call-time in the operation log (B), which is enough.
+        # Same for spike detection params: store them in operation params.
+
+        return snap
+
 
     # ----------------------------- IO / setup -----------------------------
 
@@ -229,8 +361,25 @@ class MCSData:
             self.probe_ndims,
         )
 
-    # ----------------------------- Basic API -----------------------------
+    # ----------------------------- History export ------------------------
+    def export_history_json(self, path: str, indent: int = 2) -> None:
+        """
+        Export processing history to a JSON file.
 
+        Parameters
+        ----------
+        path : str
+            Output path for the JSON file.
+        indent : int, default=2
+            JSON indentation level.
+        """
+        if self.history is None:
+            raise ValueError("No history available to export.")
+        self.history.save_json(path, indent=indent)
+
+
+    # ----------------------------- Basic API -----------------------------
+    @tracked_operation("set_mask")
     def set_mask(self, mask: np.ndarray) -> int:
         """
         Set the channel mask used by downstream operations.
@@ -252,6 +401,8 @@ class MCSData:
         self.mask = mask
         return 1
 
+
+    @tracked_operation("apply_filter")
     def apply_filter(self, bandpass=None, btype: str = "bandpass"):
         """
         Apply a SpikeInterface filter to the recording.
@@ -376,7 +527,7 @@ class MCSData:
             plt.show()
 
     # ----------------------------- Spike detection -----------------------------
-
+    @tracked_operation("detect_spikes")
     def detect_spikes(
         self,
         method: str = "by_channel",
@@ -443,6 +594,7 @@ class MCSData:
         ax.set_title("Spike Raster Plot")
         return 1
 
+    @tracked_operation("choose_mask")
     def choose_mask(self, tmin: float = 0, tmax: float = 10) -> None:
         """
         Open a GUI to select channels to include (updates `self.mask`).
@@ -550,7 +702,7 @@ class MCSData:
         self.mask = mask
 
     # ----------------------------- Temporal masking -----------------------------
-
+    @tracked_operation("blank_period")
     def blank_period(self, tstart: float, tstop: float) -> None:
         """
         Exclude a time interval from spike inclusion (updates `self.temporal_mask`).
@@ -574,6 +726,7 @@ class MCSData:
 
         mask = (self.time_vector < tstart) | (self.time_vector > tstop)
         self.temporal_mask &= mask
+        self.excluded_intervals.append((float(tstart), float(tstop)))
 
     # ----------------------------- Digital signal utilities -----------------------------
 
@@ -629,6 +782,7 @@ class MCSData:
                 edges.append(i)
         return edges
 
+    @tracked_operation("get_triggers")
     def get_triggers(
         self,
         tstart: Optional[float] = None,
@@ -702,6 +856,7 @@ class MCSData:
 
         return self.triggers
 
+    @tracked_operation("remove_artifacts_from_trigger")
     def remove_artifacts_from_trigger(
         self,
         ms_before: float = 0.1,
@@ -752,7 +907,7 @@ class MCSData:
         return self.recording
 
     # ----------------------------- Raster export -----------------------------
-
+    @tracked_operation("get_raster", include_result_artifacts=_raster_artifacts)
     def get_raster(self, tstart: Optional[float] = None, tstop: Optional[float] = None):
         """
         Build a Raster object for spikes on the currently selected channels.
@@ -806,5 +961,10 @@ class MCSData:
                 & self.temporal_mask[idx]
             )
             r.insert_timestamparray(ch, this_channel_times[keep_spikes], assume_sorted=True)
-
+        # Attach provenance snapshot directly to the raster 
+        if getattr(self, "history", None) is not None:
+                try:
+                    r.provenance = self.history.to_dict()
+                except Exception:
+                    pass
         return r
