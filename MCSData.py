@@ -20,8 +20,11 @@ import numpy as np
 import spikeinterface.extractors as se
 import spikeinterface.preprocessing as pre
 import spikeinterface.widgets as sw
+import json
+import csv
+from pathlib import Path
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, List
 from matplotlib.widgets import CheckButtons
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 from .processing_history import DatasetInfo, ProcessingHistory
@@ -400,6 +403,203 @@ class MCSData:
             raise ValueError("Mask length must match number of channels.")
         self.mask = mask
         return 1
+
+    def save_mask_and_labels(self, fname: str, csv_format: bool = False) -> int:
+        """
+        Save the current channel mask, channel IDs, and electrode labels.
+
+        Parameters
+        ----------
+        fname : str
+            Output filepath. If `csv_format` is True, this should typically end with
+            ".csv"; otherwise ".json".
+        csv_format : bool, default=False
+            If True, save as CSV (editable in a text editor). If False, save as JSON.
+
+        Returns
+        -------
+        int
+            Always returns 1 if the file is written successfully.
+
+        Raises
+        ------
+        ValueError
+            If `fname` is empty or if required attributes are not initialized.
+        """
+        if not isinstance(fname, str) or len(fname.strip()) == 0:
+            raise ValueError("`fname` must be a non-empty string.")
+
+        if self.mask is None or self.ch_ids is None or self.electrode_labels is None:
+            raise ValueError("mask/ch_ids/electrode_labels are not initialized.")
+
+        out_path = Path(fname)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        mask_list = np.asarray(self.mask, dtype=bool).tolist()
+        ch_ids_list = np.asarray(self.ch_ids).tolist()
+        labels_list = np.asarray(self.electrode_labels).tolist()
+
+        if csv_format:
+            # One row per channel: channel_id, electrode_label, keep(0/1)
+            with out_path.open("w", encoding="utf-8", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["channel_id", "electrode_label", "keep"])
+                for ch, lab, keep in zip(ch_ids_list, labels_list, mask_list):
+                    writer.writerow([ch, lab, int(bool(keep))])
+            return 1
+
+        payload: Dict[str, Any] = {
+            "mask": mask_list,
+            "channel_ids": ch_ids_list,
+            "electrode_labels": labels_list,
+        }
+        with out_path.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+
+        return 1
+
+    def load_mask_and_labels(self, fname: str) -> int:
+        """
+        Loads a mask and channel labels from a JSON or CSV file into this instance.
+
+        The loader auto-detects format:
+        - JSON: expects keys {"mask", "channel_ids", "electrode_labels"}
+        - CSV : expects header with columns including:
+        - channel_id
+        - electrode_label
+        - keep   (0/1 or true/false)
+
+        Parameters
+        ----------
+        fname : str
+            Path to the JSON/CSV file.
+
+        Returns
+        -------
+        int
+            Always returns 1 on success.
+
+        Raises
+        ------
+        FileNotFoundError
+            If `fname` does not exist.
+        ValueError
+            If the file format is unsupported, contents are invalid, or lengths mismatch.
+        """
+        if not isinstance(fname, str) or len(fname.strip()) == 0:
+            raise ValueError("`fname` must be a non-empty string.")
+
+        path = Path(fname)
+        if not path.exists():
+            raise FileNotFoundError(f"File not found: {fname}")
+
+        suffix = path.suffix.lower()
+
+        # -------------------------
+        # Helpers
+        # -------------------------
+        def _parse_keep(val) -> bool:
+            if isinstance(val, bool):
+                return val
+            if val is None:
+                raise ValueError("Missing 'keep' value.")
+            s = str(val).strip().lower()
+            if s in {"1", "true", "t", "yes", "y"}:
+                return True
+            if s in {"0", "false", "f", "no", "n"}:
+                return False
+            raise ValueError(f"Invalid keep value: {val!r} (expected 0/1 or true/false)")
+
+        def _validate_lengths(mask, ch_ids, labels) -> None:
+            if mask is None or ch_ids is None or labels is None:
+                raise ValueError("Loaded data missing one of: mask, channel_ids, electrode_labels.")
+            n = len(mask)
+            if len(ch_ids) != n or len(labels) != n:
+                raise ValueError(
+                    f"Length mismatch: mask={len(mask)}, channel_ids={len(ch_ids)}, electrode_labels={len(labels)}"
+                )
+
+            # If recording already loaded, enforce expected number of channels
+            if getattr(self, "recording", None) is not None:
+                expected = int(self.recording.get_num_channels())
+                if n != expected:
+                    raise ValueError(f"File contains {n} channels but recording has {expected} channels.")
+
+            # If ch_ids already exist, also enforce alignment length
+            if getattr(self, "ch_ids", None) is not None:
+                expected = len(self.ch_ids)
+                if n != expected:
+                    raise ValueError(f"File contains {n} channels but this instance has {expected} channels.")
+
+        # -------------------------
+        # Load JSON
+        # -------------------------
+        if suffix == ".json":
+            with path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+
+            if not isinstance(payload, dict):
+                raise ValueError("JSON file must contain an object with keys: mask, channel_ids, electrode_labels.")
+
+            try:
+                mask = payload["mask"]
+                ch_ids = payload["channel_ids"]
+                labels = payload["electrode_labels"]
+            except KeyError as exc:
+                raise ValueError(f"Missing key in JSON file: {exc}") from exc
+
+            _validate_lengths(mask, ch_ids, labels)
+
+            self.mask = np.asarray(mask, dtype=bool)
+            self.ch_ids = np.asarray(ch_ids)
+            self.electrode_labels = np.asarray(labels)
+            return 1
+
+        # -------------------------
+        # Load CSV
+        # -------------------------
+        if suffix == ".csv":
+            with path.open("r", encoding="utf-8", newline="") as f:
+                reader = csv.DictReader(f)
+                if reader.fieldnames is None:
+                    raise ValueError("CSV file has no header row.")
+
+                # Normalize fieldnames
+                fields = {name.strip().lower(): name for name in reader.fieldnames}
+
+                required = {"channel_id", "electrode_label", "keep"}
+                if not required.issubset(fields.keys()):
+                    raise ValueError(
+                        f"CSV must contain columns {sorted(required)}; found {sorted(fields.keys())}"
+                    )
+
+                ch_ids = []
+                labels = []
+                mask = []
+
+                for row_idx, row in enumerate(reader, start=2):  # header = line 1
+                    ch = row.get(fields["channel_id"])
+                    lab = row.get(fields["electrode_label"])
+                    keep_raw = row.get(fields["keep"])
+
+                    if ch is None or lab is None or keep_raw is None:
+                        raise ValueError(f"Missing values at CSV row {row_idx}.")
+
+                    ch_ids.append(ch)
+                    labels.append(lab)
+                    mask.append(_parse_keep(keep_raw))
+
+            _validate_lengths(mask, ch_ids, labels)
+
+            self.mask = np.asarray(mask, dtype=bool)
+            self.ch_ids = np.asarray(ch_ids)
+            self.electrode_labels = np.asarray(labels)
+            return 1
+
+        # -------------------------
+        # Unknown format
+        # -------------------------
+        raise ValueError(f"Unsupported file type {suffix!r}. Use .json or .csv.")
 
 
     @tracked_operation("apply_filter")
