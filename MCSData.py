@@ -689,42 +689,107 @@ class MCSData:
         )
         return self.traces
 
-    def plot_traces(
-        self,
-        tstart: Optional[float] = None,
-        tstop: Optional[float] = None,
-        channel_ids=None,
-        show: bool = True,
-    ) -> None:
+    def plot_traces_in_grid(self, tmin: float = 0, tmax: float = 10, n_subsample: Optional[int] = None, show: bool = True) -> None:
         """
-        Plot traces for a time window and channel selection.
+        Plot the traces in the MEA grid
 
         Parameters
         ----------
-        tstart : float, optional
-            Start time in seconds.
-        tstop : float, optional
-            Stop time in seconds.
-        channel_ids : list-like, optional
-            Channels to plot. Defaults to masked channels.
-        show : bool, default=True
-            Whether to call `plt.show()`.
+        tmin : float, default=0
+            Start time (s) for trace preview.
+        tmax : float, default=10
+            Stop time (s) for trace preview.
+        n_subsample: Optional[int]
+            1/n_subsample factor, represents the number of time samples skipped in plotting.
+        show: bool, defauls = True
+            Boolean option for showing the plot.
+            
+        Notes
+        -----
+        This method keeps the original 8x8 grid layout and electrode label mapping:
+        - col = lab // 10 - 1
+        - row = lab % 10 - 1
         """
-        if self.time_vector is None:
-            raise ValueError("Time vector not initialized.")
-        if channel_ids is None:
-            channel_ids = self.ch_ids[self.mask]
-        if tstart is None:
-            tstart = float(self.time_vector[0])
-        if tstop is None:
-            tstop = float(self.time_vector[-1])
+        if self.recording is None:
+            raise ValueError("Recording not loaded.")
+        if self.fsample is None:
+            raise ValueError("Sampling frequency not initialized.")
+        if self.ch_ids is None or self.electrode_labels is None:
+            raise ValueError("Channel metadata not initialized.")
 
-        if self.traces is None:
-            self.get_traces(tstart=tstart, tstop=tstop, channel_ids=channel_ids)
+        fig, axes = plt.subplots(8, 8, figsize=(8, 8))
+        plt.subplots_adjust(wspace=0.1, hspace=0.1)
 
-        sw.plot_traces(self.recording, channel_ids=channel_ids, time_range=(tstart, tstop))
+        for ax in axes.flat:
+            ax.axis("off")
+
+        n = len(self.ch_ids)
+        
+        lines = [None] * n
+        checks = [None] * n
+
+        # def make_toggle(i: int):
+        #     def _toggle(_label):
+        #         mask[i] = not mask[i]
+
+        #         ln = lines[i]
+        #         if ln is not None:
+        #             ln.set_color("C0" if mask[i] else "0.7")
+
+        #         cb = checks[i]
+        #         if cb is not None:
+        #             try:
+        #                 cb.rectangles[0].set_facecolor("white" if mask[i] else "0.9")
+        #             except Exception:
+        #                 pass
+
+        #         fig.canvas.draw_idle()
+
+        #     return _toggle
+
+        for i, (ch, lab) in enumerate(zip(self.ch_ids, self.electrode_labels)):
+            lab = int(lab)
+            col = lab // 10 - 1
+            row = lab % 10 - 1
+            ax = axes[row, col]
+
+            traces = self.recording.get_traces(
+                start_frame=int(tmin * float(self.fsample)),
+                end_frame=int(tmax * float(self.fsample)),
+                channel_ids=[ch],
+                return_in_uV=True,
+            )
+            local_time_vector = np.arange(traces.shape[0]) / float(self.fsample) + tmin
+
+            # option for subsampling
+            if n_subsample is None:
+                (ln,) = ax.plot(local_time_vector, traces, lw=0.8, color="C0")
+                lines[i] = ln
+
+                ax.set_title(lab, fontsize=6)
+                ax.set_xlim(tmin, tmax)
+                ax.set_ylim(-50, 50)
+                ax.axis("off")
+            else:
+                # check if n_subsample is >1
+                if n_subsample > 1:
+                    local_time_vector_sub = local_time_vector[::n_subsample]
+                    traces_sub = traces[::n_subsample]
+
+                    (ln,) = ax.plot(local_time_vector_sub, traces_sub, lw=0.8, color="C0")
+                    lines[i] = ln
+
+                    ax.set_title(lab, fontsize=6)
+                    ax.set_xlim(tmin, tmax)
+                    ax.set_ylim(-50, 50)
+                    ax.axis("off")
+                else:
+                    raise ValueError("n_subsample must be greater than 1.")
+
         if show:
             plt.show()
+
+        
 
     # ----------------------------- Spike detection -----------------------------
     @tracked_operation("detect_spikes")
@@ -795,7 +860,7 @@ class MCSData:
         return 1
 
     @tracked_operation("choose_mask")
-    def choose_mask(self, tmin: float = 0, tmax: float = 10) -> None:
+    def choose_mask(self, tmin: float = 0, tmax: float = 10, show: bool = True) -> None:
         """
         Open a GUI to select channels to include (updates `self.mask`).
 
@@ -805,7 +870,9 @@ class MCSData:
             Start time (s) for trace preview.
         tmax : float, default=10
             Stop time (s) for trace preview.
-
+        show: bool, defauls = True
+            Boolean option for showing the plot.
+            
         Notes
         -----
         This method keeps the original 8x8 grid layout and electrode label mapping:
@@ -897,8 +964,8 @@ class MCSData:
 
             cb.on_clicked(make_toggle(i))
             checks[i] = cb
-
-        plt.show()
+        if show:
+            plt.show()
         self.mask = mask
 
     # ----------------------------- Temporal masking -----------------------------

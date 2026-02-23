@@ -180,6 +180,7 @@ class Raster:
             If channel IDs are not int or str.
         """
         path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
 
         # ---------- JSON branch ----------
         if not h5:
