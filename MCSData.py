@@ -404,6 +404,7 @@ class MCSData:
         self.mask = mask
         return 1
 
+    @tracked_operation("save_mask_and_labels")
     def save_mask_and_labels(self, fname: str, csv_format: bool = False) -> int:
         """
         Save the current channel mask, channel IDs, and electrode labels.
@@ -458,6 +459,7 @@ class MCSData:
 
         return 1
 
+    @tracked_operation("load_mask_and_labels")
     def load_mask_and_labels(self, fname: str) -> int:
         """
         Loads a mask and channel labels from a JSON or CSV file into this instance.

@@ -295,3 +295,37 @@ def percent_random_spiking(
 
     outside = total_spikes - in_burst_spikes
     return float(outside / total_spikes)
+
+    # --------------------------- Saving and Loading scalar metrics -------------------------
+
+def save_scalar_metric(
+        list_of_metrics: Dict[str, Union[int, float, List[float], List[int]]],
+        fname: str,
+        output_folder: str = "results/",
+
+        ):
+    """
+    Function to save the list_of_metrics passed as an argument here to a json file
+
+    Parameters
+    ----------
+    list_of_metrics
+        A dictionary containing the metrics to be saved.
+    fname
+        The name of the file to save the metrics to (without extension).
+    output_folder
+        The folder to save the results in (default "results/").
+    
+    """
+
+    import json
+    import os
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+        # creates .keepholder file for results folder:
+        with open(os.path.join(output_folder, ".keepholder"), 'w') as f:
+            f.write("This folder is used to store results. Do not delete.")
+        
+        
+    with open(f"{output_folder}{fname}.json", 'w') as f:
+        json.dump(list_of_metrics, f, indent=4)
