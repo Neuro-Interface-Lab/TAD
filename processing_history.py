@@ -113,6 +113,136 @@ def decode_bool_mask(encoded: str) -> bytes:
     return base64.b64decode(encoded.encode("ascii"))
 
 
+def tracked_operation(
+    name: Optional[str] = None,
+    *,
+    track: bool = True,
+    include_result_artifacts: Optional[Callable[[Any], Dict[str, Any]]] = None,
+) -> Callable:
+    """
+    Decorator to record a method call into provenance.
+
+    It supports two targets (if present on `self`):
+      - self.processing_history : ProcessingHistory-like object with snapshot_state/state_hash/record
+      - self.history : list[dict] (lightweight generic log)
+
+    Parameters
+    ----------
+    name : str, optional
+        Operation name. Defaults to function name.
+    track : bool, default=True
+        Whether to track this operation.
+    include_result_artifacts : callable, optional
+        Function called with the method return value; must return JSON-friendly dict
+        to attach as `artifacts`.
+    """
+    def _decorator(func: Callable) -> Callable:
+        op_name = name or func.__name__
+
+        def _wrapped(self, *args, **kwargs):
+            if not track:
+                return func(self, *args, **kwargs)
+
+            # --- resolve history targets (robustly) ---
+            ph = getattr(self, "processing_history", None)
+            lightweight = getattr(self, "history", None)
+
+            has_ph = (
+                ph is not None
+                and hasattr(ph, "snapshot_state")
+                and hasattr(ph, "state_hash")
+                and hasattr(ph, "record")
+            )
+            has_lightweight = isinstance(lightweight, list)
+
+            # If nothing to log to, behave like a no-op decorator
+            if (not has_ph) and (not has_lightweight):
+                return func(self, *args, **kwargs)
+
+            # --- before snapshot/hash (ProcessingHistory only) ---
+            before_hash = None
+            if has_ph:
+                try:
+                    before_snapshot = ph.snapshot_state()
+                    before_hash = ph.state_hash(before_snapshot)
+                except Exception:
+                    before_hash = None
+
+            # run operation
+            result = func(self, *args, **kwargs)
+
+            # --- after snapshot/hash (ProcessingHistory only) ---
+            after_hash = None
+            after_snapshot = None
+            if has_ph:
+                try:
+                    after_snapshot = ph.snapshot_state()
+                    after_hash = ph.state_hash(after_snapshot)
+                except Exception:
+                    after_hash = None
+                    after_snapshot = None
+
+            # conservative params capture
+            params = _safe_json_value({"args": list(args), "kwargs": dict(kwargs)})
+
+            artifacts: Dict[str, Any] = {}
+            if include_result_artifacts is not None:
+                try:
+                    artifacts = include_result_artifacts(result) or {}
+                except Exception:
+                    artifacts = {"note": "artifact extraction failed"}
+            artifacts = _safe_json_value(artifacts)
+
+            # --- record to ProcessingHistory (rich) ---
+            if has_ph:
+                # Optional summary derived from snapshot if the getter provides these keys
+                summary: Dict[str, Any] = {}
+                if isinstance(after_snapshot, dict):
+                    if "mask_n_kept" in after_snapshot:
+                        summary["mask_n_kept"] = after_snapshot.get("mask_n_kept")
+                    if "excluded_intervals_n" in after_snapshot:
+                        summary["excluded_intervals_n"] = after_snapshot.get("excluded_intervals_n")
+
+                try:
+                    ph.record(
+                        op_name,
+                        params=params,
+                        state_before=before_hash,
+                        state_after=after_hash,
+                        summary=_safe_json_value(summary),
+                        artifacts=artifacts,
+                    )
+                except Exception:
+                    # Don't break the pipeline because provenance failed
+                    pass
+
+            # --- record to lightweight list[dict] ---
+            if has_lightweight:
+                try:
+                    lightweight.append(
+                        _safe_json_value(
+                            {
+                                "name": op_name,
+                                "timestamp_utc": _utc_now_iso(),
+                                "params": params,
+                                "state_before": before_hash,
+                                "state_after": after_hash,
+                                "artifacts": artifacts,
+                            }
+                        )
+                    )
+                except Exception:
+                    pass
+
+            return result
+
+        _wrapped.__name__ = func.__name__
+        _wrapped.__doc__ = func.__doc__
+        _wrapped.__qualname__ = func.__qualname__
+        return _wrapped
+
+    return _decorator
+
 @dataclass
 class DatasetInfo:
     """
