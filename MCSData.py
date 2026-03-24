@@ -30,6 +30,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import spikeinterface.extractors as se
 import spikeinterface.preprocessing as pre
+import spikeinterface as si
 import spikeinterface.widgets as sw
 from matplotlib.widgets import CheckButtons
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
@@ -463,7 +464,7 @@ class MCSData(EData):
         self,
         tmin: float = 0,
         tmax: float = 10,
-        n_subsample: int = 1000,
+        n_subsample: Optional[int] = None,
         show: bool = True,
     ) -> int:
         """
@@ -475,8 +476,8 @@ class MCSData(EData):
             Start time (s).
         tmax : float, default=10
             Stop time (s).
-        n_subsample : int, default=1000
-            Subsample factor for plotting.
+        n_subsample: Optional[int]
+            1/n_subsample factor, represents the number of time samples skipped in plotting.
         show : bool, default=True
             Show plot.
 
@@ -551,7 +552,8 @@ class MCSData(EData):
         method: str = "by_channel",
         peak_sign: str = "neg",
         detect_threshold: float = 5,
-        exclude_sweep_ms: float = 0.2,
+        detect_noise_levels: Optional[bool] = None,
+        exclude_sweep_ms: float = 1.0,
     ) -> int:
         """
         Detect spikes (peaks) in the recording.
@@ -575,13 +577,25 @@ class MCSData(EData):
         if self.recording is None:
             raise ValueError("Recording not loaded.")
 
-        self.peaks = detect_peaks(
-            recording=self.recording,
-            method=method,
-            peak_sign=peak_sign,
-            detect_threshold=detect_threshold,
-            exclude_sweep_ms=exclude_sweep_ms,
-        )
+        if detect_noise_levels is None:
+            self.peaks = detect_peaks(
+                recording=self.recording,
+                method=method,
+                peak_sign=peak_sign,
+                detect_threshold=detect_threshold,
+                exclude_sweep_ms=exclude_sweep_ms,
+            )
+        else:
+            noise_levels_uV = si.get_noise_levels(self.recording, return_in_uV =True)
+            self.peaks = detect_peaks(
+                recording=self.recording,
+                method=method,
+                noise_levels=noise_levels_uV,
+                peak_sign=peak_sign,
+                detect_threshold=detect_threshold,
+                exclude_sweep_ms=exclude_sweep_ms,
+            )
+        
         return 1
 
     def plot_raster(self, ax) -> int:
@@ -609,6 +623,20 @@ class MCSData(EData):
         ax.set_ylabel("Channel Index")
         ax.set_title("Spike Raster Plot")
         return 1
+    
+    def get_probe(self):
+        """
+        Get the probe object.
+
+        Returns
+        -------
+        MEAProbe
+            The probe object if generated, else None.
+        """
+
+        print(self.recording.get_probe())
+
+        return self.recording.get_probe() if self.recording is not None else None
 
     @tracked_operation("choose_mask")
     def choose_mask(self, tmin: float = 0, tmax: float = 10, show: bool = True) -> None:
@@ -904,6 +932,8 @@ class MCSData(EData):
             raise ValueError("Recording not loaded.")
 
         list_triggers = [int(slot.start * float(self.fsample)) for slot in self.triggers.slots]
+        print(np.asarray(list_triggers)/self.fsample)
+        print(ms_after)
 
         self.recording = pre.remove_artifacts(
             self.recording,
