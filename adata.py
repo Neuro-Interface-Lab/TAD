@@ -201,14 +201,14 @@ class AData(ABC):
         if csv_format or path.suffix.lower() == ".csv":
             with path.open("w", newline="", encoding="utf-8") as f:
                 w = csv.writer(f)
-                w.writerow(["channel_id", "electrode_label", "mask"])
+                w.writerow(["channel_id", "electrode_label", "keep"])
                 for cid, lab, m in zip(channel_ids, labels, mask):
                     w.writerow([cid, "" if lab is None else lab, int(bool(m))])
         else:
             payload = {
                 "channel_ids": channel_ids,
                 "electrode_labels": labels,
-                "mask": mask,
+                "keep": mask,
             }
             with path.open("w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2)
@@ -243,7 +243,7 @@ class AData(ABC):
 
             with path.open("r", newline="", encoding="utf-8") as f:
                 r = csv.DictReader(f)
-                expected = {"channel_id", "electrode_label", "mask"}
+                expected = {"channel_id", "electrode_label", "keep"}
                 if r.fieldnames is None or not expected.issubset(set(r.fieldnames)):
                     raise ValueError(
                         f"CSV must have columns {sorted(expected)} "
@@ -253,7 +253,7 @@ class AData(ABC):
                     channel_ids.append(row["channel_id"])
                     lab = row.get("electrode_label", "")
                     labels.append(None if lab is None or str(lab).strip() == "" else lab)
-                    m = row.get("mask", "0")
+                    m = row.get("keep", "0")
                     mask.append(bool(int(str(m).strip())))
 
         else:
@@ -263,13 +263,13 @@ class AData(ABC):
 
             if not isinstance(payload, dict):
                 raise ValueError("JSON content must be a dict-like object.")
-            for key in ("channel_ids", "electrode_labels", "mask"):
+            for key in ("channel_ids", "electrode_labels", "keep"):
                 if key not in payload:
                     raise ValueError(f"JSON is missing required key '{key}'.")
 
             channel_ids = list(payload["channel_ids"])
             labels = list(payload["electrode_labels"])
-            mask = [bool(x) for x in payload["mask"]]
+            mask = [bool(x) for x in payload["keep"]]
 
         n = len(self.channel_ids)
         if len(channel_ids) != n or len(labels) != n or len(mask) != n:

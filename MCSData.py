@@ -508,7 +508,6 @@ class MCSData(EData):
             col = lab // 10 - 1
             row = lab % 10 - 1
             ax = axes[row, col]
-
             traces = self.recording.get_traces(
                 start_frame=int(tmin * float(self.fsample)),
                 end_frame=int(tmax * float(self.fsample)),
@@ -549,17 +548,21 @@ class MCSData(EData):
     @tracked_operation("detect_spikes")
     def detect_spikes(
         self,
+        recording: Optional[si.BaseRecording] = None,
         method: str = "by_channel",
         peak_sign: str = "neg",
         detect_threshold: float = 5,
-        detect_noise_levels: Optional[bool] = None,
         exclude_sweep_ms: float = 1.0,
+        noise_levels=None,
+        detect_noise_levels: Optional[bool] = None,
     ) -> int:
         """
         Detect spikes (peaks) in the recording.
 
         Parameters
         ----------
+        recording : spikeinterface.BaseRecording, optional
+            Recording object to use for detect spikes. If None, uses `self.recording`. This allows using an artifact-removed recording if desired.
         method : str, default='by_channel'
             Peak detection method passed to `detect_peaks`.
         peak_sign : str, default='neg'
@@ -568,34 +571,52 @@ class MCSData(EData):
             Detection threshold.
         exclude_sweep_ms : float, default=0.2
             Exclusion window in ms.
+        noise_levels: array or None
+            array of noise levels array precomputed in uV.
+        detect_noise_levels: bool,
+            if no array of noise level is provided, they can be computed, if set to True.
 
         Returns
         -------
         int
             Always returns 1 (kept for backward compatibility).
         """
-        if self.recording is None:
-            raise ValueError("Recording not loaded.")
-
-        if detect_noise_levels is None:
-            self.peaks = detect_peaks(
-                recording=self.recording,
-                method=method,
-                peak_sign=peak_sign,
-                detect_threshold=detect_threshold,
-                exclude_sweep_ms=exclude_sweep_ms,
-            )
+        print(noise_levels, detect_threshold)
+        if recording is None:
+            recording = self.recording
         else:
-            noise_levels_uV = si.get_noise_levels(self.recording, return_in_uV =True)
+            recording = recording  # use provided recording (e.g., artifact-removed)
+        if noise_levels is None:
+            if detect_noise_levels is None:
+                self.peaks = detect_peaks(
+                    recording=recording,
+                    method=method,
+                    peak_sign=peak_sign,
+                    detect_threshold=detect_threshold,
+                    exclude_sweep_ms=exclude_sweep_ms,
+                )
+            else:
+                noise_levels_uV = si.get_noise_levels(recording, return_in_uV =True)
+                print(noise_levels_uV)
+                self.peaks = detect_peaks(
+                    recording=recording,
+                    method=method,
+                    noise_levels=noise_levels_uV,
+                    peak_sign=peak_sign,
+                    detect_threshold=detect_threshold,
+                    exclude_sweep_ms=exclude_sweep_ms,
+                )
+        else:
+            if not isinstance(noise_levels, np.ndarray):
+                raise ValueError("noise_levels must be a numpy array.")
             self.peaks = detect_peaks(
-                recording=self.recording,
+                recording=recording,
                 method=method,
-                noise_levels=noise_levels_uV,
+                noise_levels=noise_levels,
                 peak_sign=peak_sign,
                 detect_threshold=detect_threshold,
                 exclude_sweep_ms=exclude_sweep_ms,
             )
-        
         return 1
 
     def plot_raster(self, ax) -> int:
@@ -617,11 +638,19 @@ class MCSData(EData):
         if self.fsample is None:
             raise ValueError("Sampling frequency not initialized.")
 
-        peaks_sc = np.column_stack((self.peaks["sample_index"], self.peaks["channel_index"]))
-        ax.scatter(peaks_sc[:, 0] / float(self.fsample), peaks_sc[:, 1], s=1)
-        ax.set_xlabel("Sample Index")
-        ax.set_ylabel("Channel Index")
-        ax.set_title("Spike Raster Plot")
+        ch_ids = np.asarray(self.ch_ids)
+        y = ch_ids[self.peaks["channel_index"]]
+        y_vals = np.array([int(ch.replace("Ch", "")) for ch in y])
+
+        ax.scatter(self.peaks["sample_index"] / float(self.fsample), y_vals, s=1)
+        ax.set_yticks(y_vals)
+        ax.set_yticklabels(y)
+
+        # peaks_sc = np.column_stack((self.peaks["sample_index"], self.peaks["channel_index"]))
+        # ax.scatter(peaks_sc[:, 0] / float(self.fsample), peaks_sc[:, 1], s=1)
+        # ax.set_xlabel("Sample Index")
+        # ax.set_ylabel("Channel Index")
+        # ax.set_title("Spike Raster Plot")
         return 1
     
     def get_probe(self):
@@ -784,8 +813,14 @@ class MCSData(EData):
         - values > 2 are set to 0
         """
         a = self.digital_recording[0]
+        t = np.arange(len(self.digital_recording)) / float(self.fsample)
         self.digital_recording = np.log2(np.abs(self.digital_recording - a + 1))
-        self.digital_recording[self.digital_recording > 2] = 0
+        plt.plot(t, self.digital_recording)
+        plt.show()
+        # find the most common peak value in the entire digital recording and set all other non-zero values to zero
+        data = np.round(self.digital_recording).astype(int) # first round, then truncate
+        most_common_value = np.bincount(data)[1:].argmax() + 1 # find the most common nonzero value (+1 to find the int not the position)
+        self.digital_recording[data != most_common_value] = 0 # zero all others
         self.digital_recording = np.asarray(self.digital_recording, dtype=np.int32)
         return self.digital_recording
 
@@ -914,7 +949,7 @@ class MCSData(EData):
 
         Returns
         -------
-        recording : spikeinterface.BaseRecording
+        recording_clean : spikeinterface.BaseRecording
             Recording after artifact removal.
 
         Raises
@@ -932,9 +967,7 @@ class MCSData(EData):
             raise ValueError("Recording not loaded.")
 
         list_triggers = [int(slot.start * float(self.fsample)) for slot in self.triggers.slots]
-        print(np.asarray(list_triggers)/self.fsample)
-        print(ms_after)
-
+        
         self.recording = pre.remove_artifacts(
             self.recording,
             list_triggers=list_triggers,
@@ -943,7 +976,7 @@ class MCSData(EData):
             mode=mode,
         )
         self.artifact_removal_status = True
-        return self.recording
+        return 1
 
     @tracked_operation("get_raster", include_result_artifacts=_raster_artifacts)
     def get_raster(self, tstart: float = 0.0, tstop: float = 10.0):
@@ -978,11 +1011,16 @@ class MCSData(EData):
 
         from .raster import Raster  # avoid circular import
 
-        r = Raster.empty(channels=self.ch_ids[self.mask])
+        channel_ids = np.asarray(self.ch_ids)
+        kept_channel_ids = channel_ids[self.mask]
+        kept_channel_indices = np.arange(len(channel_ids))[self.mask]
 
-        peaks_sc = np.column_stack((self.peaks["sample_index"], self.peaks["channel_index"]))
-        for k, ch in enumerate(self.ch_ids[self.mask]):
-            this_channel_times = peaks_sc[peaks_sc[:, 1] == k][:, 0] / float(self.fsample)
+        r = Raster.empty(channels=kept_channel_ids)
+
+#        peaks_sc = np.column_stack((self.peaks["sample_index"], self.peaks["channel_index"]))
+
+        for orig_idx, ch in zip(kept_channel_indices, kept_channel_ids):
+            this_channel_times = self.peaks["sample_index"][self.peaks["channel_index"] == orig_idx] / float(self.fsample)
 
             idx = (this_channel_times * float(self.fsample)).astype(int)
             idx = np.clip(idx, 0, len(self.temporal_mask) - 1)
