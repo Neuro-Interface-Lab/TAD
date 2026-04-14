@@ -3,10 +3,26 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python>=3.12
+  - python=3.12
   - numpy
   - matplotlib
   - spikeinterface
   - probeinterface
   - h5py
+  - black
+  - flake8
+  - mypy
+  - pre-commit
+  - pygments
+  - pytest>=7.0
+  - pytest-cov
+  - sphinx
+  - sphinx-codeautolink
+  - sphinx-copybutton
+  - sphinx-gallery
+  - sphinx-mdinclude
+  - sphinx-rtd-theme
   - pip
+  - pip:
+    - build
+    - -e .
