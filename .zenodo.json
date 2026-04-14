@@ -1,6 +1,6 @@
 {
   "title": "TAD",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "upload_type": "software",
   "publication_type": "softwaredocumentation",
   "description": "TAD (They All Die) is a Python package for handling and analyzing neural recordings, with a focus on spike rasters, burst detection, synchrony, avalanches, and event-triggered analyses.",

@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 project = "TAD (They All Die)"
 copyright = "2026, Florian Kolbl, Jaderson Polli"
 author = "Florian Kolbl, Jaderson Polli"
-release = "1.0.1"
+release = "1.0.2"
 
 # Extensions
 extensions = [
