@@ -1,0 +1,18 @@
+[flake8]
+max-line-length = 120
+extend-ignore =
+    E231,
+    E251,
+    E261,
+    E265,
+    E302,
+    E303,
+    E501,
+    W291,
+    W292,
+    W293,
+    W391
+per-file-ignores =
+    src/tad/plotting/__init__.py:F401
+    src/tad/__init__.py:F401
+    src/tad/metrics/__init__.py:F401

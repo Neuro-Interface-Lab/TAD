@@ -17,4 +17,4 @@ __all__ = [
     "TimeSlot",
     "Triggers",
     "load_triggers_from_json",
-    ]  
+]

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence
 
 import numpy as np
 
@@ -202,9 +202,9 @@ def compute_psth(
                 continue
 
             # Slice spikes in absolute time window, then shift to relative time
-            l = np.searchsorted(arr, abs_left, side=side_left)
+            left = np.searchsorted(arr, abs_left, side=side_left)
             rr = np.searchsorted(arr, abs_right, side=side_right)
-            w = arr[l:rr]
+            w = arr[left:rr]
             if w.size == 0:
                 continue
 

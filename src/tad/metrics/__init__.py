@@ -13,7 +13,6 @@ from .synchrony import PearsonSynchronyResult, pearson_corr_firing_rate
 from .burst import Burst, BurstChannelResult, BurstDetectionResult, detect_bursts
 from .psth import compute_psth, PSTHResult
 from .evoked import EvokedPeakResult, evoked_peak_metrics, response_probability
-#from .utils import _select_channels, _infer_window, pooled_spike_times
 
 __all__ = [
     "spike_count",
@@ -22,7 +21,7 @@ __all__ = [
     "mean_inter_event_interval",
     "isi",
     "isih",
-    "ISIResult"
+    "ISIResult",
     "percent_random_spiking",
     "AvalancheResult",
     "extract_avalanches",
@@ -40,5 +39,5 @@ __all__ = [
     "PSTHResult",
     "EvokedPeakResult",
     "evoked_peak_metrics",
-    "response_probability"
+    "response_probability",
 ]

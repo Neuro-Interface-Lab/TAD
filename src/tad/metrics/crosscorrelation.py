@@ -1,21 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
+from typing import Optional
 
-import numpy as np
-
-from tad.raster import Raster, ChannelId
-from tad.metrics.utils import _select_channels, _infer_window
 
 @dataclass(frozen=True)
 class CrossCorrelationResult:
-    """
+    """Placeholder result for future cross-correlation metrics."""
 
-    """
+    value: Optional[float] = None
 
-def compute_crosscorrelation():
-    """
-    
-    """
+
+def compute_crosscorrelation() -> CrossCorrelationResult:
+    """Return a placeholder cross-correlation result."""
     return CrossCorrelationResult()
