@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" viewBox="0 0 1200 1200" fill="none">
+  <defs>
+    <linearGradient id="gT" x1="250" y1="220" x2="950" y2="220" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#14B8A6"/>
+      <stop offset="100%" stop-color="#22D3EE"/>
+    </linearGradient>
+    <linearGradient id="gA" x1="340" y1="420" x2="620" y2="900" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F8FAFC"/>
+      <stop offset="100%" stop-color="#CBD5E1"/>
+    </linearGradient>
+    <linearGradient id="gD" x1="690" y1="420" x2="930" y2="860" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F8FAFC"/>
+      <stop offset="100%" stop-color="#CBD5E1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- subtle construction ring for icon balance, transparent center -->
+  <circle cx="600" cy="600" r="455" stroke="#94A3B8" stroke-opacity="0.18" stroke-width="18"/>
+  <circle cx="600" cy="600" r="395" stroke="#94A3B8" stroke-opacity="0.10" stroke-width="10"/>
+
+  <!-- raster/event ticks around the ring -->
+  <g opacity="0.45" stroke="#64748B" stroke-width="8" stroke-linecap="round">
+    <line x1="777.5" y1="219.4" x2="786.8" y2="199.4"/>
+    <line x1="881.0" y1="287.9" x2="895.8" y2="271.5"/>
+    <line x1="960.0" y1="383.7" x2="978.9" y2="372.4"/>
+    <line x1="1007.5" y1="498.4" x2="1028.9" y2="493.1"/>
+    <line x1="1019.4" y1="622.0" x2="1041.4" y2="623.1"/>
+    <line x1="994.7" y1="743.6" x2="1015.3" y2="751.2"/>
+    <line x1="935.4" y1="852.8" x2="953.0" y2="866.0"/>
+    <line x1="846.9" y1="939.8" x2="859.8" y2="957.6"/>
+    <line x1="736.7" y1="997.1" x2="743.9" y2="1017.9"/>
+    <line x1="614.7" y1="1019.7" x2="615.4" y2="1041.7"/>
+    <line x1="491.3" y1="1005.7" x2="485.6" y2="1026.9"/>
+    <line x1="377.4" y1="956.2" x2="365.8" y2="974.8"/>
+    <line x1="283.0" y1="875.5" x2="266.4" y2="890.0"/>
+    <line x1="216.3" y1="770.8" x2="196.2" y2="779.8"/>
+    <line x1="183.1" y1="651.2" x2="161.3" y2="653.9"/>
+    <line x1="186.4" y1="527.1" x2="164.7" y2="523.2"/>
+    <line x1="225.8" y1="409.3" x2="206.2" y2="399.3"/>
+    <line x1="297.9" y1="308.2" x2="282.1" y2="293.0"/>
+    <line x1="396.4" y1="232.7" x2="385.7" y2="213.4"/>
+  </g>
+
+  <!-- T made very explicit -->
+  <g stroke="url(#gT)" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M275 235 H925" stroke-width="92"/>
+    <path d="M600 235 V500" stroke-width="92"/>
+  </g>
+
+  <!-- A -->
+  <g stroke="url(#gA)" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M385 840 L505 465 L625 840" stroke-width="62"/>
+    <path d="M445 690 H565" stroke-width="46"/>
+  </g>
+
+  <!-- D -->
+  <g stroke="url(#gD)" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M710 465 V840" stroke-width="62"/>
+    <path d="M710 465 H770 C855 465 920 535 920 652 C920 770 855 840 770 840 H710" stroke-width="62"/>
+  </g>
+
+  <!-- stimulus trace -->
+  <path d="M240 960 H392 L435 900 L490 1035 L552 820 L617 960 H960"
+        stroke="#22D3EE" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" opacity="0.95"/>
+
+  <!-- tiny subtitle integrated into icon footprint -->
+  <text x="600" y="1080" text-anchor="middle"
+        fill="#94A3B8" font-size="42" font-weight="700"
+        font-family="DejaVu Sans, Arial, sans-serif" letter-spacing="6">TAD</text>
+</svg>

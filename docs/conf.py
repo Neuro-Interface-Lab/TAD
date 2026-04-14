@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 # Add source directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 # Project information
 project = "TAD (They All Die)"
@@ -53,22 +53,30 @@ html_theme_options = {
 
 # Source file extensions
 source_suffix = {
-    ".rst": None,
-    ".md": None,
+    ".rst": "restructuredtext",
+    ".md": "markdown",
 }
 
 # Templates path
 templates_path = ["_templates"]
 
 # HTML output
-html_static_path = []
+html_static_path = ["logo"]
 
 # Logo and title
 html_title = "TAD Documentation"
-html_logo = None
+html_logo = "tad_logo_2_monogram_transparent.png"
 
 # Autodoc mock imports (if needed)
-autodoc_mock_imports = []
+autodoc_mock_imports = [
+    "probeinterface",
+    "spikeinterface",
+    "spikeinterface.extractors",
+    "spikeinterface.preprocessing",
+    "spikeinterface.widgets",
+    "spikeinterface.sortingcomponents",
+    "spikeinterface.sortingcomponents.peak_detection",
+]
 
 # Intersphinx
 intersphinx_mapping = {
