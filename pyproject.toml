@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tad-py"
+version = "1.0.0"
+description = "They All Die (TAD)"
+readme = "README.md"
+license = "GPL-3.0"
+authors = [
+    { name = "Florian Kolbl" },
+    { name = "Jaderson Polli" },
+]
+requires-python = ">=3.12"
+
+dependencies = [
+    "spikeinterface",
+    "matplotlib",
+    "numpy",
+    "probeinterface",
+]
+
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS :: MacOS X",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+    "Natural Language :: English",
+]
+
+[project.urls]
+homepage = "https://github.com/Neuro-Interface-Lab/TAD"
+documentation = "https://tad.readthedocs.io"
+repository = "https://github.com/Neuro-Interface-Lab/TAD"
+
+[project.optional-dependencies]
+dev = [
+  "black",
+  "build",
+  "flake8",
+  "furo",
+  "mypy",
+  "pre-commit",
+  "Pygments",
+  "pytest >=7.0",
+  "pytest-cov",
+  "sphinx",
+  "sphinx_codeautolink",
+  "sphinx_copybutton",
+  "sphinx_gallery",
+  "sphinx-mdinclude",
+  "sphinx-rtd-theme",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# ----------------------------
+#   Setuptools specific part
+# ----------------------------
+[tool.setuptools]
+include-package-data = true
+
