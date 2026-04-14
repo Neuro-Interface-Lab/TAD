@@ -92,3 +92,17 @@ jobs:
       git_ref: ${{ needs.bump-version.outputs.new_tag }}
       python_version: "3.12"
     secrets: inherit
+
+  sync-dev-with-main:
+    if: >
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'dev'
+    needs:
+      - publish-pypi
+    uses: ./.github/workflows/step_sync_branch.yml
+    with:
+      source_branch: main
+      target_branch: dev

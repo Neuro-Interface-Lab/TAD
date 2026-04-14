@@ -1,0 +1,31 @@
+name: Step - sync branch
+
+on:
+  workflow_call:
+    inputs:
+      source_branch:
+        description: Branch used as the source of truth
+        required: true
+        type: string
+      target_branch:
+        description: Branch to reset to the source branch
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  sync-branch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_branch }}
+          fetch-depth: 0
+
+      - name: Sync target branch to source branch
+        run: |
+          git push --force origin HEAD:${{ inputs.target_branch }}
