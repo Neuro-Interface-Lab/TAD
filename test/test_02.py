@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from tad import Raster
 import numpy as np
 import matplotlib.pyplot as plt
@@ -26,7 +28,12 @@ def _assert_equal_rasters(a: "Raster", b: "Raster") -> None:
             raise AssertionError(f"Mismatch in channel {ch!r}")
 
 
-def demo_save_load_plot(*, h5: bool, path: str) -> None:
+def demo_save_load_plot(
+    *,
+    h5: bool,
+    path: str,
+    figure_path: str | None = None,
+) -> None:
     duration = 2.0
     r = _make_poisson_raster(n_channels=10, duration=duration, rate_hz=15.0, seed=0)
 
@@ -41,13 +48,23 @@ def demo_save_load_plot(*, h5: bool, path: str) -> None:
     r2.plot(ax=axes[1], tstart=0.0, tstop=duration, show=False)
     axes[1].set_title(f"Reloaded ({'H5' if h5 else 'JSON'})")
     plt.tight_layout()
-    plt.show()
+    if figure_path is not None:
+        fig.savefig(figure_path, format="pdf")
+    plt.close(fig)
 
 
 
-
-def test_demo_save_load_plot() -> None:
-    demo_save_load_plot()
+def test_demo_save_load_plot(tmp_path: Path) -> None:
+    demo_save_load_plot(
+        h5=True,
+        path=str(tmp_path / "raster_demo.h5"),
+        figure_path=str(tmp_path / "raster_demo_h5.pdf"),
+    )
+    demo_save_load_plot(
+        h5=False,
+        path=str(tmp_path / "raster_demo.json"),
+        figure_path=str(tmp_path / "raster_demo_json.pdf"),
+    )
 
 if __name__ == "__main__":
     # HDF5 (default)
