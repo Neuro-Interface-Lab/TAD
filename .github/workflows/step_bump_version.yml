@@ -16,6 +16,9 @@ on:
       new_version:
         description: Version after bump
         value: ${{ jobs.bump-version.outputs.new_version }}
+      new_tag:
+        description: Git tag created for the new version
+        value: ${{ jobs.bump-version.outputs.new_tag }}
 
 permissions:
   contents: write
@@ -25,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.read-version.outputs.new_version }}
+      new_tag: ${{ steps.read-version.outputs.new_tag }}
 
     steps:
       - name: Checkout target branch
@@ -54,7 +58,9 @@ jobs:
       - name: Read new version
         id: read-version
         run: |
-          echo "new_version=$(bump-my-version show current_version)" >> "$GITHUB_OUTPUT"
+          new_version="$(bump-my-version show current_version)"
+          echo "new_version=${new_version}" >> "$GITHUB_OUTPUT"
+          echo "new_tag=v${new_version}" >> "$GITHUB_OUTPUT"
 
       - name: Push version commit and tag
         run: git push --follow-tags origin HEAD:${{ inputs.target_branch }}

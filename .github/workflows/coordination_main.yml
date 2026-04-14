@@ -62,6 +62,21 @@ jobs:
       bump_type: ${{ needs.resolve-release-bump.outputs.bump_type }}
       target_branch: main
 
+  create-github-release:
+    if: >
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'dev'
+    needs:
+      - bump-version
+    uses: ./.github/workflows/step_create_github_release.yml
+    with:
+      tag_name: ${{ needs.bump-version.outputs.new_tag }}
+      release_name: TAD v${{ needs.bump-version.outputs.new_version }}
+      target_commitish: main
+
   publish-pypi:
     if: >
       github.event_name == 'pull_request_target' &&
@@ -71,8 +86,9 @@ jobs:
       github.event.pull_request.head.ref == 'dev'
     needs:
       - bump-version
+      - create-github-release
     uses: ./.github/workflows/step_publish_pypi.yml
     with:
-      git_ref: main
+      git_ref: ${{ needs.bump-version.outputs.new_tag }}
       python_version: "3.12"
     secrets: inherit
