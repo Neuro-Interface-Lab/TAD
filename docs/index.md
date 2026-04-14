@@ -1,6 +1,10 @@
 # TAD - They All Die
 
-![TAD logo](https://raw.githubusercontent.com/Neuro-Interface-Lab/TAD/main/docs/tad_logo_2_monogram_transparent.png)
+<img
+  src="https://raw.githubusercontent.com/Neuro-Interface-Lab/TAD/main/docs/tad_logo_2_monogram_transparent.png"
+  alt="TAD logo"
+  width="240"
+/>
 
 **TAD** is a Python package for handling and analyzing neural spike recordings.
 It provides tools for spike detection, raster manipulation, burst analysis,
