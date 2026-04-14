@@ -1,0 +1,186 @@
+# Tutorials
+
+Learn TAD through practical examples. Each tutorial is a standalone Python script you can run to understand how to use TAD features.
+
+## Beginner Tutorials
+
+### 1. Creating and Manipulating Rasters
+
+Learn how to create a `Raster` object, add spike data, and perform basic queries.
+
+```{include} examples/ex_01_creating_rasters.py
+:code: python
+```
+
+**Key concepts:**
+- Creating a Raster with channels
+- Adding spike times with `insert_timestamparray()`
+- Querying channels and spike data
+- Dynamically adding/removing channels
+
+---
+
+### 2. Saving and Loading Data
+
+Learn how to persist raster data to disk in JSON or HDF5 format.
+
+```{include} examples/ex_02_saving_loading.py
+:code: python
+```
+
+**Key concepts:**
+- Saving rasters to JSON (text-based, portable)
+- Saving rasters to HDF5 (efficient binary format)
+- Loading data back and verifying integrity
+
+---
+
+### 3. Computing Basic Spike Statistics
+
+Compute common spike metrics like spike counts, firing rates, and inter-spike intervals.
+
+```{include} examples/ex_03_scalar_metrics.py
+:code: python
+```
+
+**Key concepts:**
+- Spike count (total and per-channel)
+- Firing rate in spikes/second
+- Mean firing rate across channels
+- Mean inter-spike intervals
+
+---
+
+## Intermediate Tutorials
+
+### 4. Time-Varying Firing Rates
+
+Compute firing rate curves that show how firing rate changes over time.
+
+```{include} examples/ex_04_firing_rates.py
+:code: python
+```
+
+**Key concepts:**
+- Sliding window firing rate
+- Per-channel firing rates
+- Population (pooled) firing rate
+- Time-frequency visualization
+
+---
+
+### 5. Avalanche Extraction and Analysis
+
+Extract and analyze neuronal avalanches—bursts of activity separated by quiet periods.
+
+```{include} examples/ex_05_avalanches.py
+:code: python
+```
+
+**Key concepts:**
+- Defining time bins
+- Avalanche size definitions
+- Avalanche lifetime
+- Identifying active bins
+
+---
+
+### 6. Neural Synchrony (Pairwise Correlation)
+
+Measure how synchronized firing is between pairs of neurons.
+
+```{include} examples/ex_06_synchrony.py
+:code: python
+```
+
+**Key concepts:**
+- Firing rate normalization (z-scoring)
+- Pearson correlation between channels
+- Correlation matrices
+- Identifying correlated neural groups
+
+---
+
+## Advanced Tutorials
+
+### 7. Working with Triggers and Events
+
+Create, save, and manage event markers (e.g., stimulus onset, behavior).
+
+```{include} examples/ex_07_triggers.py
+:code: python
+```
+
+**Key concepts:**
+- Creating `Triggers` and `TimeSlot` objects
+- Adding triggers by duration or interval
+- Saving/loading triggers to JSON
+- Querying triggers in time windows
+
+---
+
+### 8. Burst Detection
+
+Automatically detect periods of high activity (bursts) in neural recordings.
+
+```{include} examples/ex_08_burst_detection.py
+:code: python
+```
+
+**Key concepts:**
+- Log-ISI threshold method
+- Per-channel burst intervals
+- Visualizing bursts on rasters
+- Interpreting burst statistics
+
+---
+
+### 9. Inter-Spike Interval (ISI) Analysis
+
+Analyze the distribution of time intervals between consecutive spikes.
+
+```{include} examples/ex_09_isi_analysis.py
+:code: python
+```
+
+**Key concepts:**
+- Computing ISIs per channel
+- Regular vs. irregular firing
+- Coefficient of variation (CV)
+- Log-log ISI distributions
+
+---
+
+### 10. Visualization and Plotting
+
+Visualize spike rasters using various plotting modes and perspectives.
+
+```{include} examples/ex_10_visualization.py
+:code: python
+```
+
+**Key concepts:**
+- Plotting full and zoomed rasters
+- Plotting channel subsets
+- Spike count bar plots
+- Exporting figures to PDF
+
+---
+
+## Running the Examples
+
+You can run each example as a standalone script:
+
+```bash
+cd docs/examples
+python ex_01_creating_rasters.py
+python ex_02_saving_loading.py
+# ... etc
+```
+
+Or import and use them interactively in Jupyter notebooks or Python scripts.
+
+## Next Steps
+
+- Check the **[API Reference](api/index.rst)** for detailed function documentation
+- Join the community on GitHub for issues and discussions

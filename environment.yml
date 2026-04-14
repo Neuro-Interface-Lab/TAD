@@ -22,7 +22,9 @@ dependencies:
   - sphinx-gallery
   - sphinx-mdinclude
   - sphinx-rtd-theme
+  - furo
   - pip
   - pip:
     - build
+    - myst-parser
     - -e .
