@@ -47,6 +47,46 @@ jobs:
           python -m pip install --upgrade pip
           pip install bump-my-version
 
+      - name: Normalize version-tracked metadata files
+        run: |
+          current_version="$(bump-my-version show current_version)"
+          python - <<'PY' "$current_version"
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          current_version = sys.argv[1]
+
+          conf_path = Path("docs/conf.py")
+          if conf_path.exists():
+              text = conf_path.read_text()
+              text = re.sub(
+                  r'release = "[^"]+"',
+                  f'release = "{current_version}"',
+                  text,
+                  count=1,
+              )
+              conf_path.write_text(text)
+
+          citation_path = Path("CITATION.cff")
+          if citation_path.exists():
+              text = citation_path.read_text()
+              text = re.sub(
+                  r'version: "[^"]+"',
+                  f'version: "{current_version}"',
+                  text,
+                  count=1,
+              )
+              citation_path.write_text(text)
+
+          zenodo_path = Path(".zenodo.json")
+          if zenodo_path.exists():
+              data = json.loads(zenodo_path.read_text())
+              data["version"] = current_version
+              zenodo_path.write_text(json.dumps(data, indent=2) + "\n")
+          PY
+
       - name: Configure git author
         run: |
           git config user.name "github-actions[bot]"
