@@ -91,6 +91,15 @@ raster.save("my_raster.h5", h5=True)
 - API reference:
   https://tad.readthedocs.io/en/latest/api/index.html
 
+## Citation
+
+The repository now includes a `CITATION.cff` file for GitHub and a
+`.zenodo.json` file for Zenodo metadata.
+
+Once Zenodo is connected to the GitHub repository and the first GitHub release
+is archived, TAD will receive a DOI that can be added here as a badge and used
+in future scientific publications.
+
 ## License
 
 TAD is distributed under the GPL-3.0 license.
