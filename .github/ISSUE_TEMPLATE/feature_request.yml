@@ -1,0 +1,46 @@
+name: Feature request
+description: Propose an enhancement for TAD
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing an idea for TAD.
+        A good feature request explains the problem first, then the proposed solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What is difficult, missing, or painful today?
+      placeholder: I am trying to ..., but ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the feature or change you would like to see.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe workarounds or alternative approaches you have considered.
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Expected impact
+      description: Who benefits from this change and how?
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add references, examples, sketches, or related issues.
