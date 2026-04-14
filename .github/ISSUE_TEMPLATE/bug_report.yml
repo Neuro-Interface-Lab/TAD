@@ -1,0 +1,68 @@
+name: Bug report
+description: Report a reproducible problem in TAD
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve TAD.
+        Please give us enough detail to reproduce the problem and understand its impact.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: A short description of the bug.
+      placeholder: Describe the issue clearly and concisely.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: List the exact steps, commands, or code needed to reproduce the bug.
+      placeholder: |
+        1. Create or load ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include error messages or screenshots if relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Share the environment where the issue occurs.
+      placeholder: |
+        - OS:
+        - Python:
+        - TAD version:
+        - Installation method:
+        - Optional dependencies involved:
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Links, logs, data shape, or anything else that can help.

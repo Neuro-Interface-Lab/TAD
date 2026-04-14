@@ -17,12 +17,8 @@ No intentional changes to user-facing behavior or default parameters.
 
 from __future__ import annotations
 
-import base64
-import csv
-import json
 import os
 import sys
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import h5py
@@ -31,7 +27,6 @@ import numpy as np
 import spikeinterface.extractors as se
 import spikeinterface.preprocessing as pre
 import spikeinterface as si
-import spikeinterface.widgets as sw
 from matplotlib.widgets import CheckButtons
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
@@ -1031,10 +1026,12 @@ class MCSData(EData):
                 & self.temporal_mask[idx]
             )
             r.insert_timestamparray(ch, this_channel_times[keep_spikes], assume_sorted=True)
-        # Attach provenance snapshot directly to the raster 
-        if getattr(self, "history", None) is not None:
-                try:
-                    r.provenance = self.history.to_dict()
-                except Exception:
-                    pass
+        # Attach provenance snapshot directly to the raster.
+        if getattr(self, "processing_history", None) is not None:
+            try:
+                r.provenance = self.processing_history.to_dict()
+            except Exception:
+                pass
+        elif getattr(self, "history", None) is not None:
+            r.provenance = list(self.history)
         return r

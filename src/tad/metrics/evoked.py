@@ -197,9 +197,9 @@ def response_probability(
         for s in stim_used:
             a = s + float(t0)
             b = s + float(t1)
-            l = np.searchsorted(arr, a, side=side_left)
+            left = np.searchsorted(arr, a, side=side_left)
             rr = np.searchsorted(arr, b, side=side_right)
-            if rr > l:
+            if rr > left:
                 hits += 1
         resp[ci] = hits / float(n_stim)
 

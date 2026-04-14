@@ -1,0 +1,78 @@
+name: Coordination - main
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - labeled
+      - unlabeled
+  pull_request_target:
+    branches:
+      - main
+    types:
+      - closed
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  lint:
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft
+    uses: ./.github/workflows/step_lint_python.yml
+
+  tests:
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft
+    uses: ./.github/workflows/step_pytest.yml
+
+  check-bump-label:
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft
+    uses: ./.github/workflows/step_check_bump_label.yml
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+
+  resolve-release-bump:
+    if: >
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'dev'
+    uses: ./.github/workflows/step_check_bump_label.yml
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+
+  bump-version:
+    if: >
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'dev'
+    needs:
+      - resolve-release-bump
+    uses: ./.github/workflows/step_bump_version.yml
+    with:
+      bump_type: ${{ needs.resolve-release-bump.outputs.bump_type }}
+      target_branch: main
+
+  publish-pypi:
+    if: >
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'dev'
+    needs:
+      - bump-version
+    uses: ./.github/workflows/step_publish_pypi.yml
+    with:
+      git_ref: main
+      python_version: "3.12"
+    secrets: inherit

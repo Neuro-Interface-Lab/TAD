@@ -1,0 +1,60 @@
+name: Step - bump version
+
+on:
+  workflow_call:
+    inputs:
+      bump_type:
+        description: One of major, minor, patch
+        required: true
+        type: string
+      target_branch:
+        description: Branch to bump on
+        required: false
+        default: main
+        type: string
+    outputs:
+      new_version:
+        description: Version after bump
+        value: ${{ jobs.bump-version.outputs.new_version }}
+
+permissions:
+  contents: write
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.read-version.outputs.new_version }}
+
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_branch }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install bump-my-version
+        run: |
+          python -m pip install --upgrade pip
+          pip install bump-my-version
+
+      - name: Configure git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump project version
+        run: bump-my-version bump ${{ inputs.bump_type }}
+
+      - name: Read new version
+        id: read-version
+        run: |
+          echo "new_version=$(bump-my-version show current_version)" >> "$GITHUB_OUTPUT"
+
+      - name: Push version commit and tag
+        run: git push --follow-tags origin HEAD:${{ inputs.target_branch }}
