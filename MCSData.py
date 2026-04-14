@@ -23,7 +23,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import h5py
 import matplotlib.pyplot as plt
@@ -333,6 +333,21 @@ class MCSData(EData):
         if self.fsample is None:
             self.fsample = self.recording.get_sampling_frequency()
 
+    def _serialize_triggers(self) -> Optional[List[Dict[str, Any]]]:
+        if self.triggers is None:
+            return None
+        out: List[Dict[str, Any]] = []
+        for slot in getattr(self.triggers, "slots", []):
+            out.append(
+                {
+                    "start": float(getattr(slot, "start", 0.0)),
+                    "end": float(getattr(slot, "end", 0.0)),
+                    "ID": getattr(slot, "ID", None),
+                    "blank": getattr(slot, "blank", None),
+                }
+            )
+        return out
+
     def _generate_probe(self, probe_data: Optional[dict]) -> None:
         """
         Generate a probe object from probe_data.
@@ -555,6 +570,7 @@ class MCSData(EData):
         exclude_sweep_ms: float = 1.0,
         noise_levels=None,
         detect_noise_levels: Optional[bool] = None,
+        job_kwargs = None
     ) -> int:
         """
         Detect spikes (peaks) in the recording.
@@ -575,48 +591,53 @@ class MCSData(EData):
             array of noise levels array precomputed in uV.
         detect_noise_levels: bool,
             if no array of noise level is provided, they can be computed, if set to True.
+        job_kwargs
+            if not None, explicitly uses parallel computing, e.g. {'n_jobs': n}.
 
         Returns
         -------
         int
             Always returns 1 (kept for backward compatibility).
         """
-        print(noise_levels, detect_threshold)
+
         if recording is None:
             recording = self.recording
         else:
             recording = recording  # use provided recording (e.g., artifact-removed)
-        if noise_levels is None:
-            if detect_noise_levels is None:
-                self.peaks = detect_peaks(
-                    recording=recording,
-                    method=method,
-                    peak_sign=peak_sign,
-                    detect_threshold=detect_threshold,
-                    exclude_sweep_ms=exclude_sweep_ms,
-                )
-            else:
-                noise_levels_uV = si.get_noise_levels(recording, return_in_uV =True)
-                print(noise_levels_uV)
-                self.peaks = detect_peaks(
-                    recording=recording,
-                    method=method,
-                    noise_levels=noise_levels_uV,
-                    peak_sign=peak_sign,
-                    detect_threshold=detect_threshold,
-                    exclude_sweep_ms=exclude_sweep_ms,
-                )
-        else:
+
+        method_kwargs = {
+            'peak_sign': peak_sign,
+            'detect_threshold': detect_threshold,
+            'exclude_sweep_ms': exclude_sweep_ms,
+        }
+
+        if noise_levels is not None:
+            method_kwargs['noise_levels'] = noise_levels
             if not isinstance(noise_levels, np.ndarray):
                 raise ValueError("noise_levels must be a numpy array.")
             self.peaks = detect_peaks(
                 recording=recording,
                 method=method,
-                noise_levels=noise_levels,
-                peak_sign=peak_sign,
-                detect_threshold=detect_threshold,
-                exclude_sweep_ms=exclude_sweep_ms,
+                method_kwargs = method_kwargs,
+                job_kwargs = job_kwargs
             )
+        else:
+            if detect_noise_levels is None:
+                self.peaks = detect_peaks(
+                    recording=recording,
+                    method=method,
+                    method_kwargs = method_kwargs,
+                    job_kwargs = job_kwargs
+                )
+            else:
+                noise_levels = si.get_noise_levels(recording, return_in_uV =False)
+                method_kwargs['noise_levels'] = noise_levels
+                self.peaks = detect_peaks(
+                    recording=recording,
+                    method=method,
+                    method_kwargs = method_kwargs,
+                    job_kwargs = job_kwargs
+                )            
         return 1
 
     def plot_raster(self, ax) -> int:
@@ -979,7 +1000,7 @@ class MCSData(EData):
         return 1
 
     @tracked_operation("get_raster", include_result_artifacts=_raster_artifacts)
-    def get_raster(self, tstart: float = 0.0, tstop: float = 10.0):
+    def get_raster(self, tstart: float = 0.0, tstop: float = 10.0, include_amplitudes: bool = False, include_triggers: bool = False):
         """
         Export a Raster object using detected peaks and current selection.
 
@@ -1016,10 +1037,10 @@ class MCSData(EData):
         kept_channel_indices = np.arange(len(channel_ids))[self.mask]
 
         r = Raster.empty(channels=kept_channel_ids)
-
-#        peaks_sc = np.column_stack((self.peaks["sample_index"], self.peaks["channel_index"]))
+        amplitudes: Dict[Union[int, str], np.ndarray] = {}
 
         for orig_idx, ch in zip(kept_channel_indices, kept_channel_ids):
+            ch_peaks = self.peaks[self.peaks["channel_index"] == orig_idx]
             this_channel_times = self.peaks["sample_index"][self.peaks["channel_index"] == orig_idx] / float(self.fsample)
 
             idx = (this_channel_times * float(self.fsample)).astype(int)
@@ -1031,6 +1052,25 @@ class MCSData(EData):
                 & self.temporal_mask[idx]
             )
             r.insert_timestamparray(ch, this_channel_times[keep_spikes], assume_sorted=True)
+            if include_amplitudes:
+                kept_samples = ch_peaks["sample_index"].astype(int)[keep_spikes]
+                if kept_samples.size:
+                    start = int(max(0, kept_samples.min()))
+                    end = int(kept_samples.max()) + 1
+                    trace = self.recording.get_traces(
+                        start_frame=start,
+                        end_frame=end,
+                        channel_ids=[ch],
+                        return_in_uV=True,
+                    ).flatten()
+                    amplitudes[ch] = trace[kept_samples - start]
+                else:
+                    amplitudes[ch] = np.asarray([], dtype=np.float64)
+        if include_amplitudes:
+            r.amplitudes = amplitudes
+        if include_triggers:
+            r.triggers = self._serialize_triggers()
+
         # Attach provenance snapshot directly to the raster 
         if getattr(self, "history", None) is not None:
                 try:

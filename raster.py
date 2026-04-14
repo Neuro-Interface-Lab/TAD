@@ -44,6 +44,8 @@ class Raster:
         ``KeyError``.
     """
     events: Dict[ChannelId, np.ndarray] = field(default_factory=dict)
+    amplitudes: Dict[ChannelId, np.ndarray] = field(default_factory=dict)
+    triggers: Optional[List[Dict[str, Any]]] = field(default=None)
     dtype: np.dtype = np.dtype(np.float64)
     allow_new_channels: bool = True
 
@@ -66,6 +68,26 @@ class Raster:
                 arr.sort()
             normalized[ch] = arr
         self.events = normalized
+
+        normalized_amplitudes: Dict[ChannelId, np.ndarray] = {}
+        for ch, amps in self.amplitudes.items():
+            arr = np.asarray(amps, dtype=np.float64).ravel()
+            if ch not in self.events:
+                raise ValueError(f"Amplitude channel {ch!r} is not present in events.")
+            if arr.shape[0] != self.events[ch].shape[0]:
+                raise ValueError(
+                    f"Amplitude length mismatch for channel {ch!r}: "
+                    f"{arr.shape[0]} amplitudes vs {self.events[ch].shape[0]} events."
+                )
+            normalized_amplitudes[ch] = arr
+        self.amplitudes = normalized_amplitudes
+
+        if self.triggers is not None:
+            if not isinstance(self.triggers, list):
+                raise ValueError("Raster.triggers must be a list of dicts or None.")
+            for item in self.triggers:
+                if not isinstance(item, dict):
+                    raise ValueError("Each trigger entry must be a dict.")
 
     # ---------------------------------------------------------------------
     # Constructors / basic accessors
@@ -136,6 +158,10 @@ class Raster:
         out = Raster.empty(channels=self.channels(), dtype=self.dtype, allow_new_channels=self.allow_new_channels)
         for ch, arr in self.events.items():
             out.events[ch] = arr.copy()
+        for ch, amps in self.amplitudes.items():
+            out.amplitudes[ch] = amps.copy()
+        if self.triggers is not None:
+            out.triggers = [dict(t) for t in self.triggers]
         return out
     
     # ----------------------------------------------------------------------
@@ -151,6 +177,8 @@ class Raster:
         compression: Union[None, str] = "gzip",
         compression_opts: int = 4,
         overwrite: bool = True,
+        save_amplitudes: bool = False,
+        save_triggers: bool = False
     ) -> None:
         """
         Save this Raster to disk in either HDF5 or JSON format.
@@ -171,6 +199,8 @@ class Raster:
             HDF5 compression level/options (only used if `h5=True`).
         overwrite
             If True, overwrite the target HDF5 group if it exists (only used if `h5=True`).
+        save_amplitudes
+            If True, saves the amplitudes of the spikes
 
         Raises
         ------
@@ -197,13 +227,14 @@ class Raster:
                         f"Unsupported channel id type {type(ch)} for JSON serialization. Use int or str."
                     )
 
-                channels.append(
-                    {
+                record: Dict[str, Any] = {
                         "id": ch_id,
                         "type": ch_type,
                         "times": np.asarray(arr, dtype=float).ravel().tolist(),
                     }
-                )
+                if save_amplitudes and ch in self.amplitudes:
+                    record["amplitudes"] = np.asarray(self.amplitudes[ch], dtype = float).ravel().tolist() 
+                channels.append(record)
 
             payload = {
                 "schema": "Raster",
@@ -212,6 +243,8 @@ class Raster:
                 "allow_new_channels": bool(self.allow_new_channels),
                 "channels": channels,
             }
+            if save_triggers and self.triggers is not None:
+                payload["triggers"] = self.triggers
             path.write_text(json.dumps(payload, indent=indent), encoding="utf-8")
             return
 
@@ -230,6 +263,8 @@ class Raster:
             g.attrs["version"] = 1
             g.attrs["dtype"] = np.dtype(self.dtype).str
             g.attrs["allow_new_channels"] = bool(self.allow_new_channels)
+            g.attrs["has_amplitudes"] = bool(save_amplitudes and bool(self.amplitudes))
+            g.attrs["has_triggers"] = bool(save_triggers and self.triggers is not None)
 
             # Preserve channel id types using two parallel datasets
             ch_list = list(self.events.keys())
@@ -263,6 +298,25 @@ class Raster:
                     compression=compression,
                     compression_opts=compression_opts if compression else None,
                     shuffle=True if compression else False,
+                )
+            if save_amplitudes and self.amplitudes:
+                ag = g.create_group("amplitudes")
+                for i, ch in enumerate(ch_list):
+                    amps = np.asarray(self.amplitudes.get(ch, []), dtype=np.float64).ravel()
+                    ag.create_dataset(
+                        name=str(i),
+                        data=amps,
+                        dtype=np.dtype(np.float64),
+                        compression=compression,
+                        compression_opts=compression_opts if compression else None,
+                        shuffle=True if compression else False,
+                    )
+            if save_triggers and self.triggers is not None:
+                triggers_json = json.dumps(self.triggers)
+                g.create_dataset(
+                    "triggers",
+                    data=np.asarray(triggers_json, dtype=object),
+                    dtype=dt_vlen_str,
                 )
 
 
@@ -314,6 +368,8 @@ class Raster:
             allow_new_channels = bool(payload.get("allow_new_channels", True))
 
             events: Dict[ChannelId, np.ndarray] = {}
+            amplitudes: Dict[ChannelId, np.ndarray] = {}
+            triggers = None
             for rec in payload.get("channels", []):
                 ty = rec.get("type")
                 cid = rec.get("id")
@@ -328,8 +384,10 @@ class Raster:
                 if arr.size:
                     arr.sort()
                 events[ch] = arr
-
-            return cls(events=events, dtype=dtype, allow_new_channels=allow_new_channels)
+                if "amplitudes" in rec:
+                    amplitudes[ch] = np.asarray(rec["amplitudes"], dtype=np.float64).ravel()
+            triggers = payload.get("triggers", None)
+            return cls(events=events, amplitudes=amplitudes, dtype=dtype, allow_new_channels=allow_new_channels)
 
         # ---------- HDF5 branch ----------
         if h5py is None:
@@ -354,8 +412,15 @@ class Raster:
             ids = [x.decode("utf-8") if isinstance(x, bytes) else str(x) for x in g["channel_ids"][...]]
 
             times_group = g["times"]
+            amp_group = g.get("amplitudes",None)
+            triggers = None
+            if "triggers" in g:
+                raw = g["triggers"][()]
+                text = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+                triggers = json.loads(text)
 
             events: Dict[ChannelId, np.ndarray] = {}
+            amplitudes: Dict[ChannelId, np.ndarray] = {}
             for i, (ty, cid) in enumerate(zip(types, ids)):
                 if ty == "int":
                     ch: ChannelId = int(cid)
@@ -368,8 +433,10 @@ class Raster:
                 if arr.size:
                     arr.sort()
                 events[ch] = arr
+                if amp_group is not None and str(i) in amp_group:
+                    amplitudes[ch] = np.asarray(amp_group[str(i)][...], dtype=np.float64).ravel()
 
-        return cls(events=events, dtype=dtype, allow_new_channels=allow_new_channels)
+        return cls(events=events, amplitudes=amplitudes, triggers = triggers, dtype=dtype, allow_new_channels=allow_new_channels)
 
     # ---------------------------------------------------------------------
     # Private helpers
