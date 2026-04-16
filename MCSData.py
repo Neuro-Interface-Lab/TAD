@@ -836,8 +836,8 @@ class MCSData(EData):
         a = self.digital_recording[0]
         t = np.arange(len(self.digital_recording)) / float(self.fsample)
         self.digital_recording = np.log2(np.abs(self.digital_recording - a + 1))
-        plt.plot(t, self.digital_recording)
-        plt.show()
+        # plt.plot(t, self.digital_recording)
+        # plt.show()
         # find the most common peak value in the entire digital recording and set all other non-zero values to zero
         data = np.round(self.digital_recording).astype(int) # first round, then truncate
         most_common_value = np.bincount(data)[1:].argmax() + 1 # find the most common nonzero value (+1 to find the int not the position)
