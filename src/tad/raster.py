@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple, Union, Any
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 from pathlib import Path
 
 
@@ -1250,6 +1250,5 @@ class Raster:
             plt.show()
 
         return ax
-
 
 

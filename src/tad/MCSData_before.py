@@ -19,12 +19,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import spikeinterface.extractors as se
 import spikeinterface.preprocessing as pre
-import spikeinterface.widgets as sw
 import json
 import csv
 from pathlib import Path
 
-from typing import Any, Callable, Dict, Optional, List
+from typing import Any, Callable, Dict, Optional
 from matplotlib.widgets import CheckButtons
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 from .processing_history import DatasetInfo, ProcessingHistory
@@ -88,6 +87,7 @@ def on_off_interpretor(digital_recording, triggers, fsample: float) -> None:
             ID="stim_ON",
             blank=False,
         )
+
 
 def tracked_operation(
     name: Optional[str] = None,
@@ -379,7 +379,6 @@ class MCSData:
         if self.history is None:
             raise ValueError("No history available to export.")
         self.history.save_json(path, indent=indent)
-
 
     # ----------------------------- Basic API -----------------------------
     @tracked_operation("set_mask")
@@ -726,9 +725,8 @@ class MCSData:
             ax.axis("off")
 
         n = len(self.ch_ids)
-        
+
         lines = [None] * n
-        checks = [None] * n
 
         # def make_toggle(i: int):
         #     def _toggle(_label):
@@ -897,7 +895,6 @@ class MCSData:
         n = len(self.ch_ids)
         mask = np.ones(n, dtype=bool)
         lines = [None] * n
-        checks = [None] * n
 
         def make_toggle(i: int):
             def _toggle(_label):
@@ -1230,10 +1227,10 @@ class MCSData:
                 & self.temporal_mask[idx]
             )
             r.insert_timestamparray(ch, this_channel_times[keep_spikes], assume_sorted=True)
-        # Attach provenance snapshot directly to the raster 
+        # Attach provenance snapshot directly to the raster
         if getattr(self, "history", None) is not None:
-                try:
-                    r.provenance = self.history.to_dict()
-                except Exception:
-                    pass
+            try:
+                r.provenance = self.history.to_dict()
+            except Exception:
+                pass
         return r

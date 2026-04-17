@@ -2,6 +2,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/tad-py.svg)](https://pypi.org/project/tad-py/)
 [![Documentation Status](https://readthedocs.org/projects/tad/badge/?version=latest)](https://tad.readthedocs.io/en/latest/?badge=latest)
+[![DOI](https://zenodo.org/badge/1210231994.svg)](https://doi.org/10.5281/zenodo.19582597)
 
 <img
   src="https://raw.githubusercontent.com/Neuro-Interface-Lab/TAD/main/docs/tad_logo_2_monogram_transparent.png"

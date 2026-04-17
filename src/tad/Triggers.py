@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Optional, Sequence
+from typing import List, Optional
 
 import json
 
@@ -18,7 +18,7 @@ def load_triggers_from_json(filepath: str) -> 'Triggers':
         A list of TimeSlot objects representing the triggers.
     """
     try:
-        with open(filepath, 'r') as f:
+        with open(filepath, 'r'):
             loaded_triggers = Triggers(slots=[])
             loaded_triggers.load_from_json(filepath)
             return loaded_triggers
