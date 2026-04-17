@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Optional, Sequence, Union
+from typing import Optional, Sequence
 
 import matplotlib.pyplot as plt
-import numpy as np
 
 from tad.metrics import BurstDetectionResult
 from tad.raster import ChannelId

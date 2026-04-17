@@ -20,7 +20,7 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 
 JsonDict = Dict[str, Any]
@@ -58,7 +58,6 @@ def _safe_json_value(x: Any) -> Any:
         return {str(k): _safe_json_value(v) for k, v in x.items()}
 
     # Numpy types / arrays (without importing numpy as hard dependency here)
-    tname = type(x).__name__
     mod = getattr(type(x), "__module__", "")
     if mod.startswith("numpy"):
         # scalar -> python scalar

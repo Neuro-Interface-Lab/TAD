@@ -17,12 +17,8 @@ No intentional changes to user-facing behavior or default parameters.
 
 from __future__ import annotations
 
-import base64
-import csv
-import json
 import os
 import sys
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import h5py
@@ -31,7 +27,6 @@ import numpy as np
 import spikeinterface.extractors as se
 import spikeinterface.preprocessing as pre
 import spikeinterface as si
-import spikeinterface.widgets as sw
 from matplotlib.widgets import CheckButtons
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
@@ -723,7 +718,6 @@ class MCSData(EData):
         n = len(self.ch_ids)
         mask = np.ones(n, dtype=bool)
         lines = [None] * n
-        checks = [None] * n
 
         def make_toggle(i: int):
             def _toggle(_label):
@@ -834,7 +828,6 @@ class MCSData(EData):
         - values > 2 are set to 0
         """
         a = self.digital_recording[0]
-        t = np.arange(len(self.digital_recording)) / float(self.fsample)
         self.digital_recording = np.log2(np.abs(self.digital_recording - a + 1))
         # plt.plot(t, self.digital_recording)
         # plt.show()
@@ -1077,10 +1070,10 @@ class MCSData(EData):
         if include_triggers:
             r.triggers = self._serialize_triggers()
 
-        # Attach provenance snapshot directly to the raster 
+        # Attach provenance snapshot directly to the raster
         if getattr(self, "history", None) is not None:
-                try:
-                    r.provenance = self.history.to_dict()
-                except Exception:
-                    pass
+            try:
+                r.provenance = self.history.to_dict()
+            except Exception:
+                pass
         return r

@@ -17,4 +17,5 @@ __all__ = [
     "TimeSlot",
     "Triggers",
     "load_triggers_from_json",
-    ]  
+    ]
+__version__ = "1.0.2"
