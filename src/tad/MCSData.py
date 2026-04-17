@@ -17,8 +17,10 @@ No intentional changes to user-facing behavior or default parameters.
 
 from __future__ import annotations
 
+
 import os
 import sys
+
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import h5py
@@ -27,6 +29,7 @@ import numpy as np
 import spikeinterface.extractors as se
 import spikeinterface.preprocessing as pre
 import spikeinterface as si
+
 from matplotlib.widgets import CheckButtons
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
@@ -828,9 +831,9 @@ class MCSData(EData):
         - values > 2 are set to 0
         """
         a = self.digital_recording[0]
+        
         self.digital_recording = np.log2(np.abs(self.digital_recording - a + 1))
-        # plt.plot(t, self.digital_recording)
-        # plt.show()
+        
         # find the most common peak value in the entire digital recording and set all other non-zero values to zero
         data = np.round(self.digital_recording).astype(int) # first round, then truncate
         most_common_value = np.bincount(data)[1:].argmax() + 1 # find the most common nonzero value (+1 to find the int not the position)
@@ -993,20 +996,22 @@ class MCSData(EData):
         return 1
 
     @tracked_operation("get_raster", include_result_artifacts=_raster_artifacts)
-    def get_raster(self, tstart: float = 0.0, tstop: float = 10.0, include_amplitudes: bool = True, include_triggers: bool = True):
+    def get_raster(self, 
+                   tstart: Optional[float] = None,
+                   tstop: Optional[float] = None,
+                   include_amplitudes: bool = False, 
+                   include_triggers: bool = False):
         """
         Export a Raster object using detected peaks and current selection.
 
-        By default, returns a raster with both amplitudes and triggers populated.
-
         Parameters
         ----------
-        tstart : float, default=0.0
-            Start time (s).
-        tstop : float, default=10.0
-            Stop time (s).
+        tstart : float, optional
+            Start time in seconds. Defaults to start of recording.
+        tstop : float, optional
+            Stop time in seconds. Defaults to end of recording.
         include_amplitudes : bool, default=True
-            If True, include spike amplitudes in the raster.
+            If True, include spike amplitudes in the raster in uV.
         include_triggers : bool, default=True
             If True, include triggers from the recording in the raster.
 
@@ -1070,10 +1075,10 @@ class MCSData(EData):
         if include_triggers:
             r.triggers = self._serialize_triggers()
 
-        # Attach provenance snapshot directly to the raster
+        # Attach provenance snapshot directly to the raster 
         if getattr(self, "history", None) is not None:
-            try:
-                r.provenance = self.history.to_dict()
-            except Exception:
-                pass
+                try:
+                    r.provenance = self.history.to_dict()
+                except Exception:
+                    pass
         return r
