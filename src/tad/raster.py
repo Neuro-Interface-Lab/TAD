@@ -9,6 +9,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import json
 
+# Import Triggers and TimeSlot for proper trigger reconstruction
+try:
+    from .Triggers import Triggers, TimeSlot
+except ImportError:
+    # Graceful fallback if Triggers module is not available
+    Triggers = None
+    TimeSlot = None
+
 try:
     import h5py  # optional dependency
 except ImportError:  # pragma: no cover
@@ -42,10 +50,14 @@ class Raster:
         If True, missing channels referenced by methods (e.g., ``insert``) are
         created automatically. If False, referencing a missing channel raises
         ``KeyError``.
+    triggers
+        Optional Triggers object or list of trigger dicts representing time intervals
+        (e.g., stimulation periods). Can be a Triggers object from Triggers.py or
+        a raw list of dicts for backward compatibility.
     """
     events: Dict[ChannelId, np.ndarray] = field(default_factory=dict)
     amplitudes: Dict[ChannelId, np.ndarray] = field(default_factory=dict)
-    triggers: Optional[List[Dict[str, Any]]] = field(default=None)
+    triggers: Optional[Union[Any, List[Dict[str, Any]]]] = field(default=None)  # Can be Triggers object or list of dicts
     dtype: np.dtype = np.dtype(np.float64)
     allow_new_channels: bool = True
 
@@ -83,11 +95,17 @@ class Raster:
         self.amplitudes = normalized_amplitudes
 
         if self.triggers is not None:
-            if not isinstance(self.triggers, list):
-                raise ValueError("Raster.triggers must be a list of dicts or None.")
-            for item in self.triggers:
-                if not isinstance(item, dict):
-                    raise ValueError("Each trigger entry must be a dict.")
+            # Accept both Triggers objects and list of dicts
+            if Triggers is not None and isinstance(self.triggers, Triggers):
+                # Valid Triggers object, no further validation needed
+                pass
+            elif isinstance(self.triggers, list):
+                # Validate list of dicts
+                for item in self.triggers:
+                    if not isinstance(item, dict):
+                        raise ValueError("Each trigger entry must be a dict.")
+            else:
+                raise ValueError("Raster.triggers must be a Triggers object, a list of dicts, or None.")
 
     # ---------------------------------------------------------------------
     # Constructors / basic accessors
@@ -161,12 +179,107 @@ class Raster:
         for ch, amps in self.amplitudes.items():
             out.amplitudes[ch] = amps.copy()
         if self.triggers is not None:
-            out.triggers = [dict(t) for t in self.triggers]
+            # Handle both Triggers objects and dict lists
+            if Triggers is not None and isinstance(self.triggers, Triggers):
+                # Deep copy Triggers object
+                from copy import deepcopy
+                out.triggers = deepcopy(self.triggers)
+            elif isinstance(self.triggers, list):
+                # Copy list of dicts
+                out.triggers = [dict(t) for t in self.triggers]
+            else:
+                out.triggers = self.triggers
         return out
     
     # ----------------------------------------------------------------------
     # Methods for saving/loading from disk (e.g., json or HDF5)
     # ----------------------------------------------------------------------
+    @staticmethod
+    def _convert_triggers_to_dicts(triggers: Optional[Any]) -> Optional[List[Dict[str, Any]]]:
+        """
+        Convert Triggers object to a list of dicts for serialization.
+
+        If triggers is already a list of dicts or None, returns as-is.
+        If it's a Triggers object, extracts the TimeSlot information.
+
+        Parameters
+        ----------
+        triggers
+            A Triggers object, list of dicts, or None
+
+        Returns
+        -------
+        list of dict or None
+            List of trigger dicts suitable for JSON serialization
+        """
+        if triggers is None:
+            return None
+        
+        # If it's already a list of dicts, return as-is
+        if isinstance(triggers, list):
+            return triggers
+        
+        # If it's a Triggers object, convert it
+        if Triggers is not None and isinstance(triggers, Triggers):
+            try:
+                return [
+                    {
+                        "start": float(slot.start),
+                        "end": float(slot.end),
+                        "ID": slot.ID,
+                        "description": slot.description,
+                        "blank": slot.blank,
+                    }
+                    for slot in triggers.slots
+                ]
+            except Exception:
+                return None
+        
+        return None
+
+    @staticmethod
+    def _convert_trigger_dicts_to_triggers(trigger_data: Optional[List[Dict[str, Any]]]) -> Optional[Union["Triggers", List[Dict[str, Any]]]]:
+        """
+        Convert a list of trigger dictionaries to a proper Triggers object.
+
+        If Triggers class is available, reconstructs TimeSlot objects and returns
+        a Triggers container. Otherwise, returns the raw list for backward compatibility.
+
+        Parameters
+        ----------
+        trigger_data
+            List of trigger dictionaries with keys: start, end, ID, blank, description
+
+        Returns
+        -------
+        Triggers or list of dict
+            If Triggers module is available, returns Triggers object with TimeSlot instances.
+            Otherwise, returns the original list of dicts.
+        """
+        if trigger_data is None or not isinstance(trigger_data, list):
+            return trigger_data
+
+        # If Triggers module not available, return raw data
+        if Triggers is None or TimeSlot is None:
+            return trigger_data
+
+        try:
+            # Reconstruct TimeSlot objects from dicts
+            slots = []
+            for trig_dict in trigger_data:
+                slot = TimeSlot(
+                    start=float(trig_dict.get("start", 0.0)),
+                    end=float(trig_dict.get("end", 0.0)),
+                    ID=trig_dict.get("ID", None),
+                    description=trig_dict.get("description", None),
+                    blank=trig_dict.get("blank", False),
+                )
+                slots.append(slot)
+            return Triggers(slots=slots)
+        except Exception:
+            # If conversion fails, return raw data
+            return trigger_data
+
     def save(
         self,
         path: Union[str, Path],
@@ -244,7 +357,9 @@ class Raster:
                 "channels": channels,
             }
             if save_triggers and self.triggers is not None:
-                payload["triggers"] = self.triggers
+                triggers_as_dicts = self._convert_triggers_to_dicts(self.triggers)
+                if triggers_as_dicts:
+                    payload["triggers"] = triggers_as_dicts
             path.write_text(json.dumps(payload, indent=indent), encoding="utf-8")
             return
 
@@ -312,12 +427,14 @@ class Raster:
                         shuffle=True if compression else False,
                     )
             if save_triggers and self.triggers is not None:
-                triggers_json = json.dumps(self.triggers)
-                g.create_dataset(
-                    "triggers",
-                    data=np.asarray(triggers_json, dtype=object),
-                    dtype=dt_vlen_str,
-                )
+                triggers_as_dicts = self._convert_triggers_to_dicts(self.triggers)
+                if triggers_as_dicts:
+                    triggers_json = json.dumps(triggers_as_dicts)
+                    g.create_dataset(
+                        "triggers",
+                        data=np.asarray(triggers_json, dtype=object),
+                        dtype=dt_vlen_str,
+                    )
 
 
     @classmethod
@@ -386,8 +503,9 @@ class Raster:
                 events[ch] = arr
                 if "amplitudes" in rec:
                     amplitudes[ch] = np.asarray(rec["amplitudes"], dtype=np.float64).ravel()
-            triggers = payload.get("triggers", None)
-            return cls(events=events, amplitudes=amplitudes, dtype=dtype, allow_new_channels=allow_new_channels)
+            triggers_data = payload.get("triggers", None)
+            triggers = cls._convert_trigger_dicts_to_triggers(triggers_data)
+            return cls(events=events, amplitudes=amplitudes, triggers=triggers, dtype=dtype, allow_new_channels=allow_new_channels)
 
         # ---------- HDF5 branch ----------
         if h5py is None:
@@ -417,7 +535,8 @@ class Raster:
             if "triggers" in g:
                 raw = g["triggers"][()]
                 text = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
-                triggers = json.loads(text)
+                triggers_data = json.loads(text)
+                triggers = cls._convert_trigger_dicts_to_triggers(triggers_data)
 
             events: Dict[ChannelId, np.ndarray] = {}
             amplitudes: Dict[ChannelId, np.ndarray] = {}

@@ -1000,9 +1000,11 @@ class MCSData(EData):
         return 1
 
     @tracked_operation("get_raster", include_result_artifacts=_raster_artifacts)
-    def get_raster(self, tstart: float = 0.0, tstop: float = 10.0, include_amplitudes: bool = False, include_triggers: bool = False):
+    def get_raster(self, tstart: float = 0.0, tstop: float = 10.0, include_amplitudes: bool = True, include_triggers: bool = True):
         """
         Export a Raster object using detected peaks and current selection.
+
+        By default, returns a raster with both amplitudes and triggers populated.
 
         Parameters
         ----------
@@ -1010,11 +1012,15 @@ class MCSData(EData):
             Start time (s).
         tstop : float, default=10.0
             Stop time (s).
+        include_amplitudes : bool, default=True
+            If True, include spike amplitudes in the raster.
+        include_triggers : bool, default=True
+            If True, include triggers from the recording in the raster.
 
         Returns
         -------
         Raster
-            Raster object.
+            Raster object with amplitudes and triggers fields populated.
         """
         if self.peaks is None:
             raise ValueError("Spikes not detected.")
