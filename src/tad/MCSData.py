@@ -874,40 +874,67 @@ class MCSData(EData):
     @tracked_operation("get_triggers")
     def get_triggers(
         self,
+        method: str = "artifact",
         tstart: Optional[float] = None,
         tstop: Optional[float] = None,
         interpretor: Optional[Callable] = None,
         dt_after_trigger: Optional[float] = None,
+        artifact_threshold: Optional[float] = None,
+        mean_noise_level: Optional[float] = None,
+        refractory_trigger_period : Optional[float] = None,
+        stim_on_time : Optional[float] = None
+
     ):
         """
         Build `Triggers` from the digital recording in a given time window.
 
         Parameters
         ----------
+        method : str, default='artifact'
+            Method to obtain triggers.
+            - 'artifact': detect artifact blocks from the analog recording using a threshold.
+            - 'first_passage': detect the first threshold crossing of each event and generate a fixed-duration slot.
+            - 'digital_trigger': use the digital recording directly, optionally with a custom `interpretor`.
         tstart : float, optional
-            Start time in seconds. Defaults to start of recording.
+            Start time in seconds. Defaults to the start of the recording.
         tstop : float, optional
-            Stop time in seconds. Defaults to end of recording.
+            Stop time in seconds. Defaults to the end of the recording.
         interpretor : callable, optional
-            Custom function to interpret digital signal into trigger slots.
-            If None, a default rising/falling pairing is used.
+            Custom function to interpret the (windowed) digital signal into trigger slots.
+            It must accept `(digital_recording, triggers, fsample)` or
+            `(digital_recording, triggers, fsample, dt_after_trigger)`.
+            Trigger times created by the custom interpreter are assumed to be
+            relative to `tstart`; `get_triggers` will shift them to absolute time.
         dt_after_trigger : float, optional
-            If provided, passed as the fourth argument to `interpretor`.
+            Extra argument forwarded to `interpretor` when provided.
+        artifact_threshold : float, optional
+            Threshold multiplier used by `artifact` and `first_passage` methods.
+        mean_noise_level : float, optional
+            Mean noise level used by `artifact` and `first_passage` methods.
+        refractory_trigger_period : float, optional
+            Required for `first_passage`. Minimum time in seconds between consecutive triggers.
+        stim_on_time : float, optional
+            Required for `first_passage`. Duration in seconds for the generated trigger slot.
 
         Returns
         -------
         Triggers
-            Triggers object containing interval slots.
+            Trigger container with the detected interval slots.
 
         Raises
         ------
+        TypeError
+            If `method` is not a string.
         ValueError
-            If `interpretor` is not None and not callable.
+            If required arguments for the selected method are missing, invalid,
+            or if the requested time window is outside the recording range.
         """
         if self.time_vector is None:
             raise ValueError("Time vector not initialized.")
         if self.digital_recording is None:
-            raise ValueError("Digital recording not loaded. Set load_digital=True when constructing MCSData.")
+            raise ValueError(
+                "Digital recording not loaded. Set load_digital=True when constructing MCSData."
+            )
         if self.fsample is None:
             raise ValueError("Sampling frequency not initialized.")
 
@@ -916,33 +943,147 @@ class MCSData(EData):
         if tstop is None:
             tstop = float(self.time_vector[-1])
 
-        from .Triggers import Triggers  # avoid circular import
+        if not isinstance(method, str):
+            raise TypeError("method must be a string.")
+        method = method.strip().lower()
 
-        self.triggers = Triggers(slots=[])
+        if tstart < float(self.time_vector[0]) or tstop > float(self.time_vector[-1]):
+            raise ValueError(
+                "tstart and tstop must fall within the available recording interval."
+            )
+        if tstart >= tstop:
+            raise ValueError("tstart must be strictly less than tstop.")
 
-        # Window digital samples to match the requested time interval
-        window_mask = (self.time_vector >= tstart) & (self.time_vector <= tstop)
-        self.digital_recording = self.digital_recording[window_mask]
-        self.digital_recording = self.convert_digital()
+        if method not in {"artifact", "first_passage", "digital_trigger"}:
+            raise ValueError(
+                "Unknown method. Supported values are 'artifact', 'first_passage', and 'digital_trigger'."
+            )
 
-        if interpretor is None:
-            rising_edges = self.detect_digital_rising_edge()
-            falling_edges = self.detect_digital_falling_edge()
-            for start, end in zip(rising_edges, falling_edges):
-                self.triggers.add_interval_slot(
-                    start=round(start * float(self.fsample)) / float(self.fsample),
-                    end=round(end * float(self.fsample)) / float(self.fsample),
+        if method in {"artifact", "first_passage"}:
+            if artifact_threshold is None:
+                raise ValueError(
+                    "artifact_threshold is required for method='artifact' or method='first_passage'."
                 )
-        elif callable(interpretor):
-            if dt_after_trigger is None:
-                interpretor(self.digital_recording, self.triggers, float(self.fsample))
-            else:
-                interpretor(self.digital_recording, self.triggers, float(self.fsample), dt_after_trigger)
-        else:
+            if mean_noise_level is None:
+                raise ValueError(
+                    "mean_noise_level is required for method='artifact' or method='first_passage'."
+                )
+            if artifact_threshold <= 0 or mean_noise_level <= 0:
+                raise ValueError(
+                    "artifact_threshold and mean_noise_level must be positive values."
+                )
+
+        if method == "first_passage":
+            if refractory_trigger_period is None:
+                raise ValueError(
+                    "refractory_trigger_period is required for method='first_passage'."
+                )
+            if stim_on_time is None:
+                raise ValueError("stim_on_time is required for method='first_passage'.")
+            if refractory_trigger_period <= 0:
+                raise ValueError("refractory_trigger_period must be positive.")
+            if stim_on_time <= 0:
+                raise ValueError("stim_on_time must be positive.")
+
+        if method == "digital_trigger" and interpretor is not None and not callable(interpretor):
             raise ValueError(
                 "interpretor must be a callable function that defines how to interpret the digital signal into triggers."
             )
 
+        from .Triggers import Triggers  # avoid circular import
+
+        self.triggers = Triggers(slots=[])
+
+        start_frame = int(tstart * float(self.fsample))
+        end_frame = int(tstop * float(self.fsample))
+        if start_frame < 0 or end_frame <= start_frame:
+            raise ValueError("Invalid start/stop sample frame range for trigger extraction.")
+
+        if method in {"artifact", "first_passage"}:
+            traces = self.recording.get_traces(
+                start_frame=start_frame,
+                end_frame=end_frame,
+                return_in_uV=False,
+            )
+            valid_channels = np.where(self.mask)[0]
+            if len(valid_channels) == 0:
+                raise ValueError("No valid channels found in mask for artifact detection.")
+            channel_index = int(valid_channels[0])
+
+            trace = np.abs(traces[:, channel_index])
+            n = len(trace)
+            if n == 0:
+                raise ValueError("No samples available in the selected recording window.")
+            rect_trace = trace * ((-1) ** np.arange(n))
+
+            window = max(1, int(float(self.fsample) * 0.005))
+            if n < window:
+                raise ValueError(
+                    "Selected recording window is too short for artifact detection."
+                )
+
+            moving_avg = np.convolve(np.abs(rect_trace), np.ones(window), "valid") / window
+            stim_on = np.flatnonzero(moving_avg > artifact_threshold * mean_noise_level)
+
+            stim_status = np.zeros_like(moving_avg, dtype=np.int64)
+            stim_status[stim_on] = 1
+
+            plt.plot(stim_status)
+            plt.show()
+
+            rising_edges = np.flatnonzero(np.diff(stim_status) == 1) + window
+            if method == "artifact":
+                print(method)
+                falling_edges = np.flatnonzero(np.diff(stim_status) == -1) + window
+                for start_idx, end_idx in zip(rising_edges, falling_edges):
+                    self.triggers.add_interval_slot(
+                        start=float((start_frame + start_idx) / float(self.fsample)),
+                        end=float((start_frame + end_idx) / float(self.fsample)),
+                    )
+            else:
+                last_trigger_time = -np.inf
+                for start_idx in rising_edges:
+                    start_time = float((start_frame + start_idx) / float(self.fsample))
+                    if start_time - last_trigger_time < refractory_trigger_period:
+                        continue
+                    self.triggers.add_interval_slot(
+                        start=start_time,
+                        end=float(start_time + stim_on_time),
+                    )
+                    last_trigger_time = start_time
+
+        else:
+            window_mask = (self.time_vector >= tstart) & (self.time_vector <= tstop)
+            digital_window = np.asarray(self.digital_recording[window_mask], dtype=np.float64)
+            if digital_window.size == 0:
+                raise ValueError("No digital samples found in the requested time window.")
+
+            backup_digital = self.digital_recording
+            self.digital_recording = digital_window
+            self.convert_digital()
+
+            if interpretor is None:
+                rising_edges = self.detect_digital_rising_edge()
+                falling_edges = self.detect_digital_falling_edge()
+                self.digital_recording = backup_digital
+                for start_idx, end_idx in zip(rising_edges, falling_edges):
+                    self.triggers.add_interval_slot(
+                        start=float((start_frame + start_idx) / float(self.fsample)),
+                        end=float((start_frame + end_idx) / float(self.fsample)),
+                    )
+            else:
+                digital_signal = np.asarray(self.digital_recording, dtype=np.int32)
+                self.digital_recording = backup_digital
+                if dt_after_trigger is None:
+                    interpretor(digital_signal, self.triggers, float(self.fsample))
+                else:
+                    interpretor(digital_signal, self.triggers, float(self.fsample), dt_after_trigger)
+                offset = float(start_frame) / float(self.fsample)
+                for slot in self.triggers.slots:
+                    slot.start += offset
+                    slot.end += offset
+
+        self.triggers.sort_slots()
         return self.triggers
 
     @tracked_operation("remove_artifacts_from_trigger")
