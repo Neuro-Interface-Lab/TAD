@@ -310,11 +310,7 @@ def choose_isi_threshold_logisih(
 
     # Local maxima indices
     peaks = find_peaks(h_s)[0]
-    import matplotlib.pyplot as plt
-    plt.plot(centers, h, label="hist", alpha=0.5)
-    plt.plot(centers, h_s, label="hist_smooth", alpha=0.8)
-    plt.scatter(centers[peaks], h_s[peaks], color="red", label="peaks")
-    plt.show()
+
     isi_peaks = centers[peaks] if peaks.size > 0 else np.array([])
     if isi_peaks.size == 0:
         isi_th = float("nan")
