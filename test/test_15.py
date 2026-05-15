@@ -64,7 +64,7 @@ def main() -> None:
         tstop=duration,
         logisih_bins=60,
         logisih_smooth_window=7,
-        fallback_quantile=0.2,
+        fallback=0.1,
     )
 
     print(res.per_channel[7].bursts)

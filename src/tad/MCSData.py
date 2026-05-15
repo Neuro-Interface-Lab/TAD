@@ -882,9 +882,9 @@ class MCSData(EData):
         dt_after_trigger: Optional[float] = None,
         artifact_threshold: Optional[float] = None,
         mean_noise_level: Optional[float] = None,
-        refractory_trigger_period : Optional[float] = None,
-        stim_on_time : Optional[float] = None,
-        moving_avg_window : Optional[float] = 0.005
+        refractory_trigger_period: Optional[float] = None,
+        stim_on_time: Optional[float] = None,
+        moving_avg_window: Optional[float] = 0.005
 
     ):
         """
