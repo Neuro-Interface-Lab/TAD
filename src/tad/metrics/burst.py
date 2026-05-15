@@ -283,7 +283,7 @@ def choose_isi_threshold_logisih(
     h = hist.astype(np.float64, copy=False)
 
     # Smooth (moving average)
-    if type(smooth_window) == str and smooth_window == "from_bins":
+    if isinstance(smooth_window,str) and smooth_window == "from_bins":
         w = max(1, int(0.20 * centers.size))  # 20% of bins
     else:
         w = int(smooth_window)
@@ -579,7 +579,7 @@ def detect_bursts(
     method_str = (
         f"fixed_isi_th={float(isi_th)}"
         if method == "fixed"
-        else f"fixed_from_logisih(per_channel_thresholds)"
+        else "fixed_from_logisih(per_channel_thresholds)"
         if method == "fixed_from_logisih"
         else f"logisih(scope={threshold_scope}, bins={logisih_bins}, smooth={logisih_smooth_window}, fallback_q={float(fallback)})"
     )

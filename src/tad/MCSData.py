@@ -1220,8 +1220,8 @@ class MCSData(EData):
 
         # Attach provenance snapshot directly to the raster 
         if getattr(self, "history", None) is not None:
-                try:
-                    r.provenance = self.history.to_dict()
-                except Exception:
-                    pass
+            try:
+                r.provenance = self.history.to_dict()
+            except Exception:
+                pass
         return r
