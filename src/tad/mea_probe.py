@@ -4,7 +4,6 @@ from probeinterface import Probe
 from probeinterface.plotting import plot_probe
 from typing import List, Optional, Tuple, Dict
 
-
 class MEAProbe:
     """
     Wrapper around probeinterface.Probe to handle MEA probes

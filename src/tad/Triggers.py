@@ -3,7 +3,6 @@ from typing import List, Optional
 
 import json
 
-
 def load_triggers_from_json(filepath: str) -> 'Triggers':
     """
     Load triggers from a JSON file.
@@ -19,13 +18,13 @@ def load_triggers_from_json(filepath: str) -> 'Triggers':
         A list of TimeSlot objects representing the triggers.
     """
     try:
-        loaded_triggers = Triggers(slots=[])
-        loaded_triggers.load_from_json(filepath)
-        return loaded_triggers
+        with open(filepath, 'r'):
+            loaded_triggers = Triggers(slots=[])
+            loaded_triggers.load_from_json(filepath)
+            return loaded_triggers
     except Exception as e:
         print(f"Error loading triggers from JSON: {e}")
         return Triggers(slots=[])
-
 
 @dataclass
 class TimeSlot:
@@ -72,8 +71,7 @@ class TimeSlot:
     
     def __repr__(self) -> str:
         return self.__str__()
-
-
+    
 @dataclass
 class Triggers:
     """
@@ -131,7 +129,7 @@ class Triggers:
     
     def __repr__(self) -> str:
         return self.__str__()
-
+    
     def sort_slots(self) -> None:
         """
         Sort the time slots in ascending order based on their start times.

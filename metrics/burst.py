@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Literal, Optional, Sequence
+from typing import Dict, List, Literal, Optional, Sequence, Tuple
 
 import numpy as np
-from scipy.signal import find_peaks
 
 from tad.raster import Raster, ChannelId
 from tad.metrics.utils import _select_channels, _infer_window
@@ -182,18 +181,13 @@ def _detect_bursts_from_times(
 
 
 def choose_isi_threshold_logisih(
-    isi_values: Optional[np.ndarray] = None,
-    r: Optional[Raster] = None,
-    channel: Optional[ChannelId] = None,
-    tstart: Optional[float] = None,
-    tstop: Optional[float] = None,
-    inclusive_stop: bool = False,
+    isi_values: np.ndarray,
     *,
-    bins: str | int = "pasquale",
-    smooth_window: str | int = "from_bins",
+    bins: int = 60,
+    smooth_window: int = 5,
     density: bool = False,
     min_isi: float = 1e-6,
-    fallback: float = 0.1,
+    fallback_quantile: float = 0.2,
 ) -> LogISIThresholdDiagnostics:
     """
     Choose an ISI threshold from the log10(ISI) histogram (log-ISIH).
@@ -206,7 +200,7 @@ def choose_isi_threshold_logisih(
     Algorithm (robust, NumPy-only):
     1) Compute y = log10(ISI) for ISI > 0.
     2) Compute histogram of y with `bins` bins.
-    3) Smooth histogram with moving average window `smooth_window` using 20% of bins as window.
+    3) Smooth histogram with moving average window `smooth_window`.
     4) Detect local maxima (peaks) on smoothed histogram.
     5) If two sufficiently separated peaks exist, pick the valley (minimum) between them
        and set ISI_th = 10**(center_at_valley).
@@ -217,33 +211,21 @@ def choose_isi_threshold_logisih(
     isi_values
         1D array of ISIs (>0).
     bins
-        Number of bins in log10(ISI) space, or method from np.histogram.
+        Number of bins in log10(ISI) space.
     smooth_window
-        Moving average smoothing window length, or method from number of bins.
+        Moving average smoothing window length.
     density
         If True, histogram is density; otherwise counts.
     min_isi
         Minimum ISI value before log transform (prevents log(0)).
-    fallback
-        ISI used if peak/valley detection fails.
+    fallback_quantile
+        Quantile used if peak/valley detection fails.
 
     Returns
     -------
     LogISIThresholdDiagnostics
         Contains chosen ISI_th and intermediate arrays/indices for inspection.
     """
-    if isi_values is None and r is None:
-        raise ValueError("Pass isi_values or r.")
-    if isi_values is not None and r is not None:
-        raise ValueError("Pass only isi_values or r.")
-    if r is not None:
-        ch = channel
-        tstart_f, tstop_f = _infer_window(r, [ch], tstart, tstop)
-        arr = r.events[channel]
-        left = np.searchsorted(arr, tstart_f, side="left")
-        right = np.searchsorted(arr, tstop_f, side=("right" if inclusive_stop else "left"))
-        w = arr[left:right]
-        isi_values = np.diff(w).astype(np.float64, copy=False) if w.size >= 2 else np.asarray([], dtype=np.float64)
     x = np.asarray(isi_values, dtype=np.float64).ravel()
     x = x[np.isfinite(x) & (x > 0.0)]
     if x.size == 0:
@@ -261,32 +243,16 @@ def choose_isi_threshold_logisih(
     x = np.maximum(x, float(min_isi))
     y = np.log10(x)
 
-    if bins == "pasquale":
-        y_max = np.max(y)
-        y_min = np.min(y)
-        # set bin size to 0.1 in log10 space:
-        bins = int(np.ceil((y_max - y_min) / 0.1))
-    if bins < 1:
-        isi_th = float("nan")
-        return LogISIThresholdDiagnostics(
-            isi_th=isi_th,
-            centers_log10=None,
-            hist=None,
-            hist_smooth=None,
-            peak1_idx=-1,
-            peak2_idx=-1,
-            valley_idx=-1,
-            method="not_able_to_find_bins",
-        )
-    hist, edges = np.histogram(y, bins=bins, density=bool(density))
+    hist, edges = np.histogram(y, bins=int(bins), density=bool(density))
     centers = 0.5 * (edges[:-1] + edges[1:])
     h = hist.astype(np.float64, copy=False)
 
+    import matplotlib.pyplot as plt
+    plt.plot(centers, h, label="raw")
+    plt.show()
+
     # Smooth (moving average)
-    if isinstance(smooth_window,str) and smooth_window == "from_bins":
-        w = max(1, int(0.20 * centers.size))  # 20% of bins
-    else:
-        w = int(smooth_window)
+    w = int(smooth_window)
     if w < 1:
         w = 1
     if w > 1:
@@ -296,7 +262,7 @@ def choose_isi_threshold_logisih(
         h_s = h.copy()
 
     if h_s.size < 3:
-        isi_th = float("nan")
+        isi_th = float(np.quantile(x, fallback_quantile))
         return LogISIThresholdDiagnostics(
             isi_th=isi_th,
             centers_log10=centers,
@@ -305,56 +271,13 @@ def choose_isi_threshold_logisih(
             peak1_idx=-1,
             peak2_idx=-1,
             valley_idx=-1,
-            method="not_able_to_find_bursts",
+            method="fallback_quantile_bins_too_small",
         )
 
     # Local maxima indices
-    peaks = find_peaks(h_s)[0]
-    import matplotlib.pyplot as plt
-    plt.plot(centers, h, label="hist", alpha=0.5)
-    plt.plot(centers, h_s, label="hist_smooth", alpha=0.8)
-    plt.scatter(centers[peaks], h_s[peaks], color="red", label="peaks")
-    plt.show()
-    isi_peaks = centers[peaks] if peaks.size > 0 else np.array([])
-    if isi_peaks.size == 0:
-        isi_th = float("nan")
-        return LogISIThresholdDiagnostics(
-            isi_th=isi_th,
-            centers_log10=centers,
-            hist=h,
-            hist_smooth=h_s,
-            peak1_idx=-1,
-            peak2_idx=-1,
-            valley_idx=-1,
-            method="no_burst_regime_no_peaks",
-        )
-    if isi_peaks[0] > -1.0:
-        isi_th = float("nan")
-        return LogISIThresholdDiagnostics(
-            isi_th=isi_th,
-            centers_log10=centers,
-            hist=h,
-            hist_smooth=h_s,
-            peak1_idx=int(peaks[0]) if peaks.size > 0 else -1,
-            peak2_idx=int(peaks[1]) if peaks.size > 1 else -1,
-            valley_idx=-1,
-            method="no_burst_regime_first_peak_high",
-        )
-    if isi_peaks[-1] < -1.0:
-        isi_th = float(fallback)
-        return LogISIThresholdDiagnostics(
-            isi_th=isi_th,
-            centers_log10=centers,
-            hist=h,
-            hist_smooth=h_s,
-            peak1_idx=int(peaks[0]) if peaks.size > 0 else -1,
-            peak2_idx=int(peaks[1]) if peaks.size > 1 else -1,
-            valley_idx=-1,
-            method="fallback_returned",
-        )
-
-    if peaks.size < 2 and isi_peaks[0] < -1.0:
-        isi_th = float(fallback)
+    peaks = np.where((h_s[1:-1] > h_s[:-2]) & (h_s[1:-1] >= h_s[2:]))[0] + 1
+    if peaks.size < 2:
+        isi_th = float(np.quantile(x, fallback_quantile))
         return LogISIThresholdDiagnostics(
             isi_th=isi_th,
             centers_log10=centers,
@@ -363,35 +286,40 @@ def choose_isi_threshold_logisih(
             peak1_idx=int(peaks[0]) if peaks.size == 1 else -1,
             peak2_idx=-1,
             valley_idx=-1,
-            method="fallback_returned",
+            method="fallback_quantile_not_enough_peaks",
         )
-        
-    # Find last peak with log10(isi) < -1.0 and maximum peak with log10(isi) > -1.0
-    intra_burst_peaks = isi_peaks[isi_peaks < -1.0]
-    idx_last_intra_burst_peak = peaks[int(len(intra_burst_peaks) - 1)]
-    inter_burst_peaks = isi_peaks[isi_peaks > -1.0]
-    argmax_inter = np.argmax(inter_burst_peaks)
-    idx_in_isi_peaks = np.where(isi_peaks > -1.0)[0][argmax_inter]
-    idx_first_inter_burst_peak = peaks[idx_in_isi_peaks]
 
-    peak1_idx, peak2_idx = (idx_last_intra_burst_peak, idx_first_inter_burst_peak)
+    # Select two peaks with separation
+    peak_heights = h_s[peaks]
+    order = np.argsort(peak_heights)[::-1]
+    peaks_sorted = peaks[order]
 
-    if h_s[peak1_idx] < 0.05 * h_s[peak2_idx]:
-        isi_th = float("nan")
+    p1 = int(peaks_sorted[0])
+    p2 = -1
+    min_sep = max(2, int(0.10 * h_s.size))  # 10% of bins
+    for cand in peaks_sorted[1:]:
+        if abs(int(cand) - p1) >= min_sep:
+            p2 = int(cand)
+            break
+
+    if p2 == -1:
+        isi_th = float(np.quantile(x, fallback_quantile))
         return LogISIThresholdDiagnostics(
             isi_th=isi_th,
             centers_log10=centers,
             hist=h,
             hist_smooth=h_s,
-            peak1_idx=int(peak1_idx),
-            peak2_idx=int(peak2_idx),
+            peak1_idx=p1,
+            peak2_idx=-1,
             valley_idx=-1,
-            method="no_burst_regime_small_first_peak",
+            method="fallback_quantile_peaks_too_close",
         )
+
+    peak1_idx, peak2_idx = (p1, p2) if p1 < p2 else (p2, p1)
 
     seg = h_s[peak1_idx:peak2_idx + 1]
     if seg.size < 3:
-        isi_th = float(fallback)
+        isi_th = float(np.quantile(x, fallback_quantile))
         return LogISIThresholdDiagnostics(
             isi_th=isi_th,
             centers_log10=centers,
@@ -400,7 +328,7 @@ def choose_isi_threshold_logisih(
             peak1_idx=int(peak1_idx),
             peak2_idx=int(peak2_idx),
             valley_idx=-1,
-            method="fallback_segment_too_small",
+            method="fallback_quantile_segment_too_small",
         )
 
     valley_rel = int(np.argmin(seg))
@@ -422,22 +350,22 @@ def choose_isi_threshold_logisih(
 def detect_bursts(
     r: Raster,
     *,
-    method: Literal["fixed", "logisih", "fixed_from_logisih"] = "fixed",
-    isi_th: float | np.ndarray = 0.1,
+    method: Literal["fixed", "logisih"] = "fixed",
+    isi_th: float = 0.1,
     min_spikes: int = 3,
     channels: Optional[Sequence[ChannelId]] = None,
     tstart: Optional[float] = None,
     tstop: Optional[float] = None,
     inclusive_stop: bool = False,
     threshold_scope: Literal["per_channel", "pooled"] = "per_channel",
-    logisih_bins: str | int = "auto",
-    logisih_smooth_window: str | int = "from_bins",
-    fallback: float = 0.1,
+    logisih_bins: int = 60,
+    logisih_smooth_window: int = 5,
+    fallback_quantile: float = 0.2,
 ) -> BurstDetectionResult:
     """
     Detect single-channel bursts in a Raster.
 
-    Three threshold-selection methods are supported:
+    Two threshold-selection methods are supported:
 
     1) method="fixed"
         Uses the constant threshold `isi_th` for all channels.
@@ -446,11 +374,6 @@ def detect_bursts(
         Derives the ISI threshold from the log10(ISI) histogram (log-ISIH) either:
         - per channel (threshold_scope="per_channel"), or
         - from pooled ISIs across selected channels (threshold_scope="pooled").
-    
-    3) method="fixed_from_logisih"
-        Uses pre-calculated ISI thresholds from log-ISIH analysis.
-        For this method, `isi_th` must be an array with one threshold value per channel
-        in the same order as `channels`.
 
     Burst definition (segmentation):
     A burst is a maximal consecutive sequence of spikes such that every consecutive
@@ -462,10 +385,9 @@ def detect_bursts(
     r
         Input raster.
     method
-        Threshold selection method: "fixed", "logisih", or "fixed_from_logisih".
+        Threshold selection method: "fixed" or "logisih".
     isi_th
-        ISI threshold(s) in seconds. For "fixed" and "logisih", a single float.
-        For "fixed_from_logisih", an array of floats with one per channel.
+        Fixed ISI threshold in seconds (only used when method="fixed").
     min_spikes
         Minimum number of spikes required to accept a burst.
     channels
@@ -479,11 +401,11 @@ def detect_bursts(
         - "per_channel": compute a separate ISI_th per channel from that channel's ISIs
         - "pooled": compute a single ISI_th from pooled ISIs across channels and reuse it
     logisih_bins
-        Number of bins in log10(ISI) histogram, or method for numpy.histogram ("auto", "fd", "doane", "sqrt" etc) (method="logisih").
+        Number of bins in log10(ISI) histogram (method="logisih").
     logisih_smooth_window
-        Smoothing window length for histogram, or method to determine it from number of bins (method="logisih").
-    fallback
-        ISI threshold value used when log-ISIH peak/valley detection fails.
+        Smoothing window length for histogram (method="logisih").
+    fallback_quantile
+        Fallback quantile of ISI values used when log-ISIH peak/valley detection fails.
 
     Returns
     -------
@@ -497,8 +419,8 @@ def detect_bursts(
     ValueError
         If parameters are inconsistent.
     """
-    if method not in ("fixed", "logisih", "fixed_from_logisih"):
-        raise ValueError("method must be 'fixed', 'logisih', or 'fixed_from_logisih'.")
+    if method not in ("fixed", "logisih"):
+        raise ValueError("method must be 'fixed' or 'logisih'.")
 
     if threshold_scope not in ("per_channel", "pooled"):
         raise ValueError("threshold_scope must be 'per_channel' or 'pooled'.")
@@ -508,15 +430,6 @@ def detect_bursts(
 
     ch_list = _select_channels(r, channels)
     tstart_f, tstop_f = _infer_window(r, ch_list, tstart, tstop)
-
-    # Validate isi_th for fixed_from_logisih method
-    if method == "fixed_from_logisih":
-        isi_th_array = np.asarray(isi_th)
-        if isi_th_array.ndim != 1 or isi_th_array.size != len(ch_list):
-            raise ValueError(
-                f"For method='fixed_from_logisih', isi_th must be a 1D array with "
-                f"exactly {len(ch_list)} elements (one per channel), but got shape {isi_th_array.shape}"
-            )
 
     out: Dict[ChannelId, BurstChannelResult] = {}
 
@@ -541,11 +454,11 @@ def detect_bursts(
             pooled_concat,
             bins=logisih_bins,
             smooth_window=logisih_smooth_window,
-            fallback=fallback,
+            fallback_quantile=fallback_quantile,
         )
         pooled_isi_th = pooled_diag.isi_th
 
-    for i, ch in enumerate(ch_list):
+    for ch in ch_list:
         arr = r.events[ch]
         left = np.searchsorted(arr, tstart_f, side="left")
         right = np.searchsorted(arr, tstop_f, side=("right" if inclusive_stop else "left"))
@@ -555,10 +468,7 @@ def detect_bursts(
 
         if method == "fixed":
             isi_th_ch = float(isi_th)
-        elif method == "fixed_from_logisih":
-            isi_th_array = np.asarray(isi_th)
-            isi_th_ch = float(isi_th_array[i])
-        else:  # method == "logisih"
+        else:
             if threshold_scope == "pooled":
                 diag = pooled_diag
                 isi_th_ch = float(pooled_isi_th) if pooled_isi_th is not None else float("nan")
@@ -568,7 +478,7 @@ def detect_bursts(
                     isi_vals,
                     bins=logisih_bins,
                     smooth_window=logisih_smooth_window,
-                    fallback=fallback,
+                    fallback_quantile=fallback_quantile,
                 )
                 isi_th_ch = float(diag.isi_th)
 
@@ -583,9 +493,7 @@ def detect_bursts(
     method_str = (
         f"fixed_isi_th={float(isi_th)}"
         if method == "fixed"
-        else "fixed_from_logisih(per_channel_thresholds)"
-        if method == "fixed_from_logisih"
-        else f"logisih(scope={threshold_scope}, bins={logisih_bins}, smooth={logisih_smooth_window}, fallback_q={float(fallback)})"
+        else f"logisih(scope={threshold_scope}, bins={int(logisih_bins)}, smooth={int(logisih_smooth_window)}, fallback_q={float(fallback_quantile)})"
     )
 
     return BurstDetectionResult(

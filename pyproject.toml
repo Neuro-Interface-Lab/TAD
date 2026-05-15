@@ -20,6 +20,7 @@ dependencies = [
     "matplotlib",
     "numpy",
     "probeinterface",
+    "scipy"
 ]
 
 classifiers = [
@@ -102,3 +103,8 @@ replace = 'version: "{new_version}"'
 filename = ".zenodo.json"
 search = '"version": "{current_version}"'
 replace = '"version": "{new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "src/tad/__init__.py"
+search = '__version__ = "{current_version}"'
+replace = '__version__ = "{new_version}"'

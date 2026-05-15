@@ -15,44 +15,39 @@ def make_bursty_raster(
     r = Raster.empty(channels=range(n_channels))
 
     # Sparse deterministic background activity on all channels.
-    background_times = np.array([0.15, 0.85, 2.1, 4.35], dtype=float)
+    rng = np.random.default_rng(seed=42)
+
+    # normal distribution with mean isi of 2.0s:
+    background_mean_isi = 3
+    isi_bg = rng.normal(loc = background_mean_isi, scale=1, size=250)
+    background_times = np.cumsum(isi_bg)
     for ch in range(n_channels):
-        offset = ch * 0.001
+        offset = ch * rng.uniform(0.0, 0.5)  # Slight per-channel offset to avoid perfect overlap
         r.insert_timestamparray(ch, background_times + offset, assume_sorted=True)
 
-    # Two clear burst epochs with short ISIs inside each burst and long gaps outside.
-    burst_blocks = np.array(
-        [
-            1.000,
-            1.008,
-            1.016,
-            1.024,
-            1.032,
-            1.040,
-            3.000,
-            3.009,
-            3.018,
-            3.027,
-            3.036,
-            3.045,
-        ],
-        dtype=float,
-    )
-
+    # normal distribution iwth mean isi of 0.01s, in bursts of 50 spikes:
+    background_mean_isi = 0.01
+    burst_isi = rng.normal(loc = background_mean_isi, scale=0.01, size=200)
+    burst_times = np.cumsum(burst_isi)
+    # choose 10 burst times within 0 to 100 s
+    burst_blocks = rng.uniform(0, 750, size=30)
+    burst_times = burst_blocks[:, None] + burst_times[None, :]
+    burst_times = burst_times.flatten()
     for i, ch in enumerate(burst_channels):
         # Slight per-channel offset keeps channels distinct while preserving burst structure.
-        offset = i * 0.0005
+        offset = i * rng.uniform(0.0, 0.5)
         r.insert_timestamparray(
             ch,
-            burst_blocks + offset,
+            burst_times + offset,
             assume_sorted=True,
         )
+    r.plot(show=True)
 
     return r
 
 
 def main() -> None:
-    duration = 5.0
+    duration = 100.0
     r = make_bursty_raster()
 
     res = detect_bursts(
@@ -64,7 +59,7 @@ def main() -> None:
         tstop=duration,
         logisih_bins=60,
         logisih_smooth_window=7,
-        fallback_quantile=0.2,
+        fallback=0.1,
     )
 
     print(res.per_channel[7].bursts)

@@ -9,6 +9,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import json
 
+# Import Triggers and TimeSlot for proper trigger reconstruction
+try:
+    from .Triggers import Triggers, TimeSlot
+except ImportError:
+    # Graceful fallback if Triggers module is not available
+    Triggers = None
+    TimeSlot = None
+
 try:
     import h5py  # optional dependency
 except ImportError:  # pragma: no cover
@@ -42,8 +50,14 @@ class Raster:
         If True, missing channels referenced by methods (e.g., ``insert``) are
         created automatically. If False, referencing a missing channel raises
         ``KeyError``.
+    triggers
+        Optional Triggers object or list of trigger dicts representing time intervals
+        (e.g., stimulation periods). Can be a Triggers object from Triggers.py or
+        a raw list of dicts for backward compatibility.
     """
     events: Dict[ChannelId, np.ndarray] = field(default_factory=dict)
+    amplitudes: Dict[ChannelId, np.ndarray] = field(default_factory=dict)
+    triggers: Optional[Union[Any, List[Dict[str, Any]]]] = field(default=None)  # Can be Triggers object or list of dicts
     dtype: np.dtype = np.dtype(np.float64)
     allow_new_channels: bool = True
 
@@ -66,6 +80,32 @@ class Raster:
                 arr.sort()
             normalized[ch] = arr
         self.events = normalized
+
+        normalized_amplitudes: Dict[ChannelId, np.ndarray] = {}
+        for ch, amps in self.amplitudes.items():
+            arr = np.asarray(amps, dtype=np.float64).ravel()
+            if ch not in self.events:
+                raise ValueError(f"Amplitude channel {ch!r} is not present in events.")
+            if arr.shape[0] != self.events[ch].shape[0]:
+                raise ValueError(
+                    f"Amplitude length mismatch for channel {ch!r}: "
+                    f"{arr.shape[0]} amplitudes vs {self.events[ch].shape[0]} events."
+                )
+            normalized_amplitudes[ch] = arr
+        self.amplitudes = normalized_amplitudes
+
+        if self.triggers is not None:
+            # Accept both Triggers objects and list of dicts
+            if Triggers is not None and isinstance(self.triggers, Triggers):
+                # Valid Triggers object, no further validation needed
+                pass
+            elif isinstance(self.triggers, list):
+                # Validate list of dicts
+                for item in self.triggers:
+                    if not isinstance(item, dict):
+                        raise ValueError("Each trigger entry must be a dict.")
+            else:
+                raise ValueError("Raster.triggers must be a Triggers object, a list of dicts, or None.")
 
     # ---------------------------------------------------------------------
     # Constructors / basic accessors
@@ -136,11 +176,147 @@ class Raster:
         out = Raster.empty(channels=self.channels(), dtype=self.dtype, allow_new_channels=self.allow_new_channels)
         for ch, arr in self.events.items():
             out.events[ch] = arr.copy()
+        for ch, amps in self.amplitudes.items():
+            out.amplitudes[ch] = amps.copy()
+        if self.triggers is not None:
+            # Handle both Triggers objects and dict lists
+            if Triggers is not None and isinstance(self.triggers, Triggers):
+                # Deep copy Triggers object
+                from copy import deepcopy
+                out.triggers = deepcopy(self.triggers)
+            elif isinstance(self.triggers, list):
+                # Copy list of dicts
+                out.triggers = [dict(t) for t in self.triggers]
+            else:
+                out.triggers = self.triggers
         return out
     
     # ----------------------------------------------------------------------
     # Methods for saving/loading from disk (e.g., json or HDF5)
     # ----------------------------------------------------------------------
+    @staticmethod
+    def _convert_triggers_to_dicts(triggers: Optional[Any]) -> Optional[List[Dict[str, Any]]]:
+        """
+        Convert Triggers object to a list of dicts for serialization.
+
+        If triggers is already a list of dicts or None, returns as-is.
+        If it's a Triggers object, extracts the TimeSlot information.
+
+        Parameters
+        ----------
+        triggers
+            A Triggers object, list of dicts, or None
+
+        Returns
+        -------
+        list of dict or None
+            List of trigger dicts suitable for JSON serialization
+        """
+        if triggers is None:
+            return None
+        
+        # If it's already a list of dicts, return as-is
+        if isinstance(triggers, list):
+            return triggers
+        
+        # If it's a Triggers object, convert it
+        if Triggers is not None and isinstance(triggers, Triggers):
+            try:
+                return [
+                    {
+                        "start": float(slot.start),
+                        "end": float(slot.end),
+                        "ID": slot.ID,
+                        "description": slot.description,
+                        "blank": slot.blank,
+                    }
+                    for slot in triggers.slots
+                ]
+            except Exception:
+                return None
+        
+        return None
+
+    @staticmethod
+    def _convert_trigger_dicts_to_triggers(trigger_data: Optional[List[Dict[str, Any]]]) -> Optional[Union["Triggers", List[Dict[str, Any]]]]:
+        """
+        Convert a list of trigger dictionaries to a proper Triggers object.
+
+        If Triggers class is available, reconstructs TimeSlot objects and returns
+        a Triggers container. Otherwise, returns the raw list for backward compatibility.
+
+        Parameters
+        ----------
+        trigger_data
+            List of trigger dictionaries with keys: start, end, ID, blank, description
+
+        Returns
+        -------
+        Triggers or list of dict
+            If Triggers module is available, returns Triggers object with TimeSlot instances.
+            Otherwise, returns the original list of dicts.
+        """
+        if trigger_data is None or not isinstance(trigger_data, list):
+            return trigger_data
+
+        # If Triggers module not available, return raw data
+        if Triggers is None or TimeSlot is None:
+            return trigger_data
+
+        try:
+            # Reconstruct TimeSlot objects from dicts
+            slots = []
+            for trig_dict in trigger_data:
+                slot = TimeSlot(
+                    start=float(trig_dict.get("start", 0.0)),
+                    end=float(trig_dict.get("end", 0.0)),
+                    ID=trig_dict.get("ID", None),
+                    description=trig_dict.get("description", None),
+                    blank=trig_dict.get("blank", False),
+                )
+                slots.append(slot)
+            return Triggers(slots=slots)
+        except Exception:
+            # If conversion fails, return raw data
+            return trigger_data
+
+    def get_trigger_intervals(self) -> List[Tuple[float, float]]:
+        """
+        Return trigger intervals as a list of (start, end) tuples.
+
+        Supports both `Triggers` objects and backward-compatible lists of
+        trigger dictionaries.
+        """
+        intervals: List[Tuple[float, float]] = []
+        if self.triggers is None:
+            return intervals
+
+        if Triggers is not None and isinstance(self.triggers, Triggers):
+            for slot in self.triggers.slots:
+                try:
+                    start = float(slot.start)
+                    end = float(slot.end)
+                except Exception:
+                    continue
+                if start < end:
+                    intervals.append((start, end))
+            return intervals
+
+        if isinstance(self.triggers, list):
+            for item in self.triggers:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    start = float(item["start"])
+                    end = float(item["end"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if start < end:
+                    intervals.append((start, end))
+            return intervals
+
+        return intervals
+
     def save(
         self,
         path: Union[str, Path],
@@ -151,6 +327,8 @@ class Raster:
         compression: Union[None, str] = "gzip",
         compression_opts: int = 4,
         overwrite: bool = True,
+        save_amplitudes: bool = False,
+        save_triggers: bool = False
     ) -> None:
         """
         Save this Raster to disk in either HDF5 or JSON format.
@@ -171,6 +349,8 @@ class Raster:
             HDF5 compression level/options (only used if `h5=True`).
         overwrite
             If True, overwrite the target HDF5 group if it exists (only used if `h5=True`).
+        save_amplitudes
+            If True, saves the amplitudes of the spikes
 
         Raises
         ------
@@ -197,13 +377,14 @@ class Raster:
                         f"Unsupported channel id type {type(ch)} for JSON serialization. Use int or str."
                     )
 
-                channels.append(
-                    {
+                record: Dict[str, Any] = {
                         "id": ch_id,
                         "type": ch_type,
                         "times": np.asarray(arr, dtype=float).ravel().tolist(),
                     }
-                )
+                if save_amplitudes and ch in self.amplitudes:
+                    record["amplitudes"] = np.asarray(self.amplitudes[ch], dtype = float).ravel().tolist() 
+                channels.append(record)
 
             payload = {
                 "schema": "Raster",
@@ -212,6 +393,10 @@ class Raster:
                 "allow_new_channels": bool(self.allow_new_channels),
                 "channels": channels,
             }
+            if save_triggers and self.triggers is not None:
+                triggers_as_dicts = self._convert_triggers_to_dicts(self.triggers)
+                if triggers_as_dicts:
+                    payload["triggers"] = triggers_as_dicts
             path.write_text(json.dumps(payload, indent=indent), encoding="utf-8")
             return
 
@@ -230,6 +415,8 @@ class Raster:
             g.attrs["version"] = 1
             g.attrs["dtype"] = np.dtype(self.dtype).str
             g.attrs["allow_new_channels"] = bool(self.allow_new_channels)
+            g.attrs["has_amplitudes"] = bool(save_amplitudes and bool(self.amplitudes))
+            g.attrs["has_triggers"] = bool(save_triggers and self.triggers is not None)
 
             # Preserve channel id types using two parallel datasets
             ch_list = list(self.events.keys())
@@ -264,6 +451,27 @@ class Raster:
                     compression_opts=compression_opts if compression else None,
                     shuffle=True if compression else False,
                 )
+            if save_amplitudes and self.amplitudes:
+                ag = g.create_group("amplitudes")
+                for i, ch in enumerate(ch_list):
+                    amps = np.asarray(self.amplitudes.get(ch, []), dtype=np.float64).ravel()
+                    ag.create_dataset(
+                        name=str(i),
+                        data=amps,
+                        dtype=np.dtype(np.float64),
+                        compression=compression,
+                        compression_opts=compression_opts if compression else None,
+                        shuffle=True if compression else False,
+                    )
+            if save_triggers and self.triggers is not None:
+                triggers_as_dicts = self._convert_triggers_to_dicts(self.triggers)
+                if triggers_as_dicts:
+                    triggers_json = json.dumps(triggers_as_dicts)
+                    g.create_dataset(
+                        "triggers",
+                        data=np.asarray(triggers_json, dtype=object),
+                        dtype=dt_vlen_str,
+                    )
 
 
     @classmethod
@@ -314,6 +522,8 @@ class Raster:
             allow_new_channels = bool(payload.get("allow_new_channels", True))
 
             events: Dict[ChannelId, np.ndarray] = {}
+            amplitudes: Dict[ChannelId, np.ndarray] = {}
+            triggers = None
             for rec in payload.get("channels", []):
                 ty = rec.get("type")
                 cid = rec.get("id")
@@ -328,8 +538,11 @@ class Raster:
                 if arr.size:
                     arr.sort()
                 events[ch] = arr
-
-            return cls(events=events, dtype=dtype, allow_new_channels=allow_new_channels)
+                if "amplitudes" in rec:
+                    amplitudes[ch] = np.asarray(rec["amplitudes"], dtype=np.float64).ravel()
+            triggers_data = payload.get("triggers", None)
+            triggers = cls._convert_trigger_dicts_to_triggers(triggers_data)
+            return cls(events=events, amplitudes=amplitudes, triggers=triggers, dtype=dtype, allow_new_channels=allow_new_channels)
 
         # ---------- HDF5 branch ----------
         if h5py is None:
@@ -354,8 +567,16 @@ class Raster:
             ids = [x.decode("utf-8") if isinstance(x, bytes) else str(x) for x in g["channel_ids"][...]]
 
             times_group = g["times"]
+            amp_group = g.get("amplitudes",None)
+            triggers = None
+            if "triggers" in g:
+                raw = g["triggers"][()]
+                text = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+                triggers_data = json.loads(text)
+                triggers = cls._convert_trigger_dicts_to_triggers(triggers_data)
 
             events: Dict[ChannelId, np.ndarray] = {}
+            amplitudes: Dict[ChannelId, np.ndarray] = {}
             for i, (ty, cid) in enumerate(zip(types, ids)):
                 if ty == "int":
                     ch: ChannelId = int(cid)
@@ -368,8 +589,10 @@ class Raster:
                 if arr.size:
                     arr.sort()
                 events[ch] = arr
+                if amp_group is not None and str(i) in amp_group:
+                    amplitudes[ch] = np.asarray(amp_group[str(i)][...], dtype=np.float64).ravel()
 
-        return cls(events=events, dtype=dtype, allow_new_channels=allow_new_channels)
+        return cls(events=events, amplitudes=amplitudes, triggers = triggers, dtype=dtype, allow_new_channels=allow_new_channels)
 
     # ---------------------------------------------------------------------
     # Private helpers
@@ -1097,6 +1320,10 @@ class Raster:
         linewidth: float = 1.0,
         sort_channels: bool = True,
         show: bool = False,
+        plot_triggers: bool = False,
+        trigger_color: str = "red",
+        trigger_alpha: float = 0.5,
+        trigger_linewidth: float = 2.0,
     ) -> plt.Axes:
         """
         Plot the raster using matplotlib.
@@ -1128,6 +1355,15 @@ class Raster:
             If True, try to sort channel IDs for display.
         show
             If True, calls ``plt.show()`` before returning.
+        plot_triggers
+            If True, draw trigger intervals from ``self.triggers`` as horizontal
+            lines above the raster.
+        trigger_color
+            Color used for trigger interval lines.
+        trigger_alpha
+            Transparency of the trigger lines.
+        trigger_linewidth
+            Line width used for trigger interval lines.
 
         Returns
         -------
@@ -1167,6 +1403,25 @@ class Raster:
                 continue
             y = y_positions[i]
             ax.vlines(ts, y - tick_halfheight, y + tick_halfheight, linewidth=linewidth)
+
+        if plot_triggers and self.triggers is not None:
+            trigger_intervals = self.get_trigger_intervals()
+            if trigger_intervals:
+                for start, end in trigger_intervals:
+                    if tstart is not None:
+                        start = max(start, float(tstart))
+                    if tstop is not None:
+                        end = min(end, float(tstop))
+                    if end <= start:
+                        continue
+                    ax.axvspan(
+                        start,
+                        end,
+                        color=trigger_color,
+                        alpha=trigger_alpha,
+                        linewidth=0,
+                        zorder=3,
+                    )
 
         ax.set_yticks(y_positions)
         ax.set_yticklabels([str(ch) for ch in ch_list])
