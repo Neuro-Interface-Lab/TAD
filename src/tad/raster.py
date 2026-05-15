@@ -280,6 +280,43 @@ class Raster:
             # If conversion fails, return raw data
             return trigger_data
 
+    def get_trigger_intervals(self) -> List[Tuple[float, float]]:
+        """
+        Return trigger intervals as a list of (start, end) tuples.
+
+        Supports both `Triggers` objects and backward-compatible lists of
+        trigger dictionaries.
+        """
+        intervals: List[Tuple[float, float]] = []
+        if self.triggers is None:
+            return intervals
+
+        if Triggers is not None and isinstance(self.triggers, Triggers):
+            for slot in self.triggers.slots:
+                try:
+                    start = float(slot.start)
+                    end = float(slot.end)
+                except Exception:
+                    continue
+                if start < end:
+                    intervals.append((start, end))
+            return intervals
+
+        if isinstance(self.triggers, list):
+            for item in self.triggers:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    start = float(item["start"])
+                    end = float(item["end"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if start < end:
+                    intervals.append((start, end))
+            return intervals
+
+        return intervals
+
     def save(
         self,
         path: Union[str, Path],
@@ -1283,6 +1320,10 @@ class Raster:
         linewidth: float = 1.0,
         sort_channels: bool = True,
         show: bool = False,
+        plot_triggers: bool = False,
+        trigger_color: str = "red",
+        trigger_alpha: float = 0.5,
+        trigger_linewidth: float = 2.0,
     ) -> plt.Axes:
         """
         Plot the raster using matplotlib.
@@ -1314,6 +1355,15 @@ class Raster:
             If True, try to sort channel IDs for display.
         show
             If True, calls ``plt.show()`` before returning.
+        plot_triggers
+            If True, draw trigger intervals from ``self.triggers`` as horizontal
+            lines above the raster.
+        trigger_color
+            Color used for trigger interval lines.
+        trigger_alpha
+            Transparency of the trigger lines.
+        trigger_linewidth
+            Line width used for trigger interval lines.
 
         Returns
         -------
@@ -1353,6 +1403,25 @@ class Raster:
                 continue
             y = y_positions[i]
             ax.vlines(ts, y - tick_halfheight, y + tick_halfheight, linewidth=linewidth)
+
+        if plot_triggers and self.triggers is not None:
+            trigger_intervals = self.get_trigger_intervals()
+            if trigger_intervals:
+                for start, end in trigger_intervals:
+                    if tstart is not None:
+                        start = max(start, float(tstart))
+                    if tstop is not None:
+                        end = min(end, float(tstop))
+                    if end <= start:
+                        continue
+                    ax.axvspan(
+                        start,
+                        end,
+                        color=trigger_color,
+                        alpha=trigger_alpha,
+                        linewidth=0,
+                        zorder=3,
+                    )
 
         ax.set_yticks(y_positions)
         ax.set_yticklabels([str(ch) for ch in ch_list])

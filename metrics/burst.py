@@ -247,6 +247,10 @@ def choose_isi_threshold_logisih(
     centers = 0.5 * (edges[:-1] + edges[1:])
     h = hist.astype(np.float64, copy=False)
 
+    import matplotlib.pyplot as plt
+    plt.plot(centers, h, label="raw")
+    plt.show()
+
     # Smooth (moving average)
     w = int(smooth_window)
     if w < 1:

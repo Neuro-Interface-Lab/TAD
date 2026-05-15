@@ -721,8 +721,9 @@ class MCSData(EData):
         n = len(self.ch_ids)
         mask = np.ones(n, dtype=bool)
         lines = [None] * n
+        checks = [None] * n
 
-        def make_toggle(i: int):
+        def make_toggle(i: int, checks):
             def _toggle(_label):
                 mask[i] = not mask[i]
 
@@ -787,7 +788,7 @@ class MCSData(EData):
                     except Exception:
                         pass
 
-            cb.on_clicked(make_toggle(i))
+            cb.on_clicked(make_toggle(i, checks))
             checks[i] = cb
         if show:
             plt.show()
@@ -882,7 +883,8 @@ class MCSData(EData):
         artifact_threshold: Optional[float] = None,
         mean_noise_level: Optional[float] = None,
         refractory_trigger_period : Optional[float] = None,
-        stim_on_time : Optional[float] = None
+        stim_on_time : Optional[float] = None,
+        moving_avg_window : Optional[float] = 0.005
 
     ):
         """
@@ -915,6 +917,8 @@ class MCSData(EData):
             Required for `first_passage`. Minimum time in seconds between consecutive triggers.
         stim_on_time : float, optional
             Required for `first_passage`. Duration in seconds for the generated trigger slot.
+        moving_avg_window : float, optional
+            Time in ms of the moving average window when artifact or first passage methods are chosen.
 
         Returns
         -------
@@ -1016,7 +1020,7 @@ class MCSData(EData):
                 raise ValueError("No samples available in the selected recording window.")
             rect_trace = trace * ((-1) ** np.arange(n))
 
-            window = max(1, int(float(self.fsample) * 0.005))
+            window = max(1, int(float(self.fsample) * moving_avg_window))
             if n < window:
                 raise ValueError(
                     "Selected recording window is too short for artifact detection."
@@ -1028,8 +1032,6 @@ class MCSData(EData):
             stim_status = np.zeros_like(moving_avg, dtype=np.int64)
             stim_status[stim_on] = 1
 
-            plt.plot(stim_status)
-            plt.show()
 
             rising_edges = np.flatnonzero(np.diff(stim_status) == 1) + window
             if method == "artifact":
