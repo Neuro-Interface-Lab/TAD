@@ -11,7 +11,7 @@ from .raster import Raster
 def get_raster_from_csv(
     fname: Union[str, Path],
     *,
-    delimiter: str = ",",
+    delimiter: str = ";",
     skiprows: int = 0,
     comments: str = "#",
     channels: Optional[Iterable[int]] = None,
