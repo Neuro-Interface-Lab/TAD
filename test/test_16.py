@@ -104,5 +104,45 @@ def main() -> None:
 
 def test_main() -> None:
     main()
+
+
+def test_compute_psth_pooled_matches_summed_channels() -> None:
+    r, stim_times = make_evoked_raster()
+
+    psth_per = compute_psth(
+        r,
+        stim_times,
+        dt=0.002,
+        t_pre=0.050,
+        t_post=0.100,
+        channels=range(0, 16),
+        tstart=0.0,
+        tstop=10.0,
+        inclusive_zero=True,
+        mode="per_channel",
+    )
+    psth_pooled = compute_psth(
+        r,
+        stim_times,
+        dt=0.002,
+        t_pre=0.050,
+        t_post=0.100,
+        channels=range(0, 16),
+        tstart=0.0,
+        tstop=10.0,
+        inclusive_zero=True,
+        mode="pooled",
+    )
+
+    assert psth_pooled.counts.shape == (1, psth_pooled.t.shape[0])
+    assert psth_pooled.rate_hz.shape == psth_pooled.counts.shape
+    assert psth_pooled.total_counts.shape == psth_pooled.counts.shape
+    assert psth_pooled.channels == ["pooled"]
+    assert psth_pooled.mode == "pooled"
+    assert np.allclose(psth_pooled.counts[0], psth_per.counts.sum(axis=0))
+    assert np.allclose(psth_pooled.rate_hz[0], psth_per.rate_hz.sum(axis=0))
+    assert np.allclose(psth_per.total_counts, psth_per.counts * psth_per.stim_times_used.size)
+    assert np.allclose(psth_pooled.total_counts[0], psth_pooled.counts[0] * psth_pooled.stim_times_used.size)
+
 if __name__ == "__main__":
     main()

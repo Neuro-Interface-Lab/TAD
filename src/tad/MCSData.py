@@ -141,18 +141,29 @@ class MCSData(EData):
 
     def __init__(
         self,
-        fname: str,
+        fname: Optional[str] = None,
         fsample: Optional[float] = None,
         load_recording: bool = True,
         load_digital: bool = False,
         generate_probe: bool = False,
         probe_data: Optional[dict] = None,
+        recording: Optional[si.BaseRecording] = None,
     ) -> None:
-        if not os.path.exists(fname):
-            raise FileNotFoundError(f"File {fname} does not exist.")
+        if recording is None:
+            if fname is None:
+                raise ValueError("Either fname or recording must be provided.")
+            if not os.path.exists(fname):
+                raise FileNotFoundError(f"File {fname} does not exist.")
+        else:
+            if fname is None:
+                fname = "<recording>"
+            if load_digital:
+                raise ValueError(
+                    "Cannot load digital data when constructing from an existing recording object."
+                )
 
         # Keep these as before (public/state)
-        self.fname: str = fname
+        self.fname: str = str(fname)
         self.fsample: Optional[float] = fsample
         self.load_digital: bool = load_digital
 
@@ -185,8 +196,14 @@ class MCSData(EData):
         self.artifact_removal_status: bool = False
 
         # Load recording first (to preserve original behaviour/attributes)
-        if load_recording:
+        if recording is not None:
+            self.recording = recording
+        elif load_recording:
             self._load_recording()
+
+        if self.recording is not None:
+            if self.fsample is None:
+                self.fsample = self.recording.get_sampling_frequency()
             self.time_vector = np.arange(self.recording.get_total_samples()) / float(self.fsample)
             self.ch_ids = self.recording.channel_ids
             self.electrode_labels = self.recording.get_property("electrode_labels")
@@ -197,7 +214,7 @@ class MCSData(EData):
             self._generate_probe(probe_data)
 
         # Now initialize EData/AData with the loaded channel axis (minimal change)
-        if load_recording and self.recording is not None:
+        if self.recording is not None:
             rec = self.recording  # preserve handle; EData sets self.recording = None
 
             super().__init__(
@@ -222,14 +239,14 @@ class MCSData(EData):
                 channel_ids=[],
                 electrode_labels=None,
                 mask=None,
-                fname=fname,
+                fname=self.fname,
                 recording_system="MCS",
             )
 
         # History:
         # - AData already has `self.history: list[dict]` (lightweight)
         # - Here we keep a rich ProcessingHistory for export_history_json
-        if load_recording and self.recording is not None:
+        if self.recording is not None:
             ds = DatasetInfo.from_path(
                 fname=self.fname,
                 sampling_frequency=float(self.fsample) if self.fsample is not None else None,
@@ -311,19 +328,25 @@ class MCSData(EData):
         - Uses stream_id=1.
         - Renames channels based on electrode_labels to "Ch{label}".
         """
-        try:
-            self.recording = se.read_mcsh5(self.fname, stream_id=1)
-        except Exception as exc:
-            print(f"Error loading recording: {exc}")
-            sys.exit(1)
 
         if self.load_digital:
+            try:
+                self.recording = se.read_mcsh5(self.fname, stream_id=1)
+            except Exception as exc:
+                print(f"Error loading recording: {exc}. load_digital is {self.load_digital}, set it to {not(self.load_digital)}")
+                sys.exit(1)
             try:
                 with h5py.File(self.fname, "r") as f:
                     stream = f["Data/Recording_0/AnalogStream/Stream_0/ChannelData"]
                     self.digital_recording = stream[0]
             except Exception as exc:
                 print(f"Error loading digital recording: {exc}")
+        else:
+            try:
+                self.recording = se.read_mcsh5(self.fname, stream_id=0)
+            except Exception as exc:
+                print(f"Error loading recording: {exc}. load_digital is {self.load_digital}, set it to {not(self.load_digital)}")
+                sys.exit(1)
 
         electrode_labels = self.recording.get_property("electrode_labels")
         self.recording = self.recording.rename_channels([f"Ch{lab}" for lab in electrode_labels])
@@ -372,6 +395,102 @@ class MCSData(EData):
             shape_params=self.probe_shape_params,
             ndims=self.probe_ndims,
         )
+
+    @classmethod
+    def from_recording(
+        cls,
+        recording: si.BaseRecording,
+        fname: Optional[str] = None,
+        fsample: Optional[float] = None,
+        generate_probe: bool = False,
+        probe_data: Optional[dict] = None,
+        time_vector: Optional[np.ndarray] = None,
+        mask: Optional[np.ndarray] = None,
+        excluded_intervals: Optional[List[Tuple[float, float]]] = None,
+        triggers: Optional[Any] = None,
+    ) -> "MCSData":
+        """
+        Create an MCSData object from an existing SpikeInterface recording.
+
+        Parameters
+        ----------
+        recording : spikeinterface.BaseRecording
+            Existing recording object (for example, a FrameSliceRecording).
+        fname : str, optional
+            Optional source filename for provenance.
+        fsample : float, optional
+            Sampling frequency in Hz. If None, read from the recording.
+        generate_probe : bool, default=False
+            Generate a probe object from probe_data.
+        probe_data : dict, optional
+            Probe configuration for probe generation.
+        time_vector : np.ndarray, optional
+            Time vector for the recording. If None, a 0-based vector is created.
+        mask : np.ndarray, optional
+            Channel mask. If None, all channels are kept.
+        excluded_intervals : list of tuple, optional
+            Excluded intervals for the new object.
+        triggers : Triggers, optional
+            Trigger container for the new object.
+
+        Returns
+        -------
+        MCSData
+            New MCSData instance wrapping the provided recording.
+        """
+        if fsample is None:
+            fsample = recording.get_sampling_frequency()
+
+        obj = cls(
+            fname=fname,
+            fsample=fsample,
+            load_recording=False,
+            load_digital=False,
+            generate_probe=generate_probe,
+            probe_data=probe_data,
+            recording=recording,
+        )
+
+        obj.time_vector = (
+            np.asarray(time_vector, dtype=float)
+            if time_vector is not None
+            else np.arange(recording.get_total_samples()) / float(obj.fsample)
+        )
+        obj.temporal_mask = np.ones_like(obj.time_vector, dtype=bool)
+
+        if mask is not None:
+            obj.mask = np.asarray(mask, dtype=bool)
+
+        if excluded_intervals is not None:
+            obj.excluded_intervals = list(excluded_intervals)
+
+        if triggers is not None:
+            obj.triggers = triggers
+
+        return obj
+    
+    def save_recording_h5(self, path, fname, 
+                          h5_group: str = "/Data/Recording_0/AnalogStream/Stream_", 
+                          stream_id: int = 0
+                          ):
+        """
+        Saves a MCSdata recording object into an h5 file at 'path' and 'fname' with the given h5_struc in the given 'stream_id'
+
+        path: str
+            Path where the recording will be saved
+        fname: str
+            File name 
+        h5_group: str
+            Structure of the h5 groups.
+        stream_id: int
+            Stream id value
+        """
+
+        filename = path + "/" + fname
+
+        with h5py.File(filename, "w") as f:
+            f.require_group(h5_group+str(stream_id))
+            
 
     # -----------------------------------------------------------------
     # Backward-compatible wrappers for AData methods
@@ -553,6 +672,105 @@ class MCSData(EData):
                     ax.axis("off")
                 else:
                     raise ValueError("n_subsample must be greater than 1.")
+
+        if show:
+            plt.show()
+        return 1
+
+    def plot_PSTH_in_grid(
+        self,
+        psth,
+        kind: str = "rate",
+        show: bool = True,
+    ) -> int:
+        """
+        Plot PSTH for each channel in an 8x8 grid layout.
+
+        Parameters
+        ----------
+        psth : tad.metrics.psth.PSTHResult
+            Per-channel PSTH result from `tad.metrics.psth.compute_psth`.
+        kind : {'rate', 'counts', 'total_counts'}, default='rate'
+            Which PSTH quantity to plot.
+        show : bool, default=True
+            Show plot.
+
+        Returns
+        -------
+        int
+            Always returns 1 (backward compatible).
+
+        Notes
+        -----
+        The layout follows the same 8x8 electrode grid used by
+        :meth:`plot_traces_in_grid`. Channels that are not present in the PSTH
+        result remain empty in the grid.
+        """
+        if self.ch_ids is None or self.electrode_labels is None:
+            raise ValueError("Channel metadata not initialized.")
+        if getattr(psth, "mode", None) != "per_channel":
+            raise ValueError("plot_PSTH_in_grid requires a per-channel PSTHResult.")
+
+        if kind == "rate":
+            values = psth.rate_hz
+        elif kind == "counts":
+            values = psth.counts
+        elif kind == "total_counts":
+            values = psth.total_counts
+        else:
+            raise ValueError("kind must be 'rate', 'counts', or 'total_counts'.")
+
+        def _normalize_channel_id(channel_id):
+            if isinstance(channel_id, str):
+                if channel_id.startswith("Ch"):
+                    try:
+                        return int(channel_id[2:])
+                    except ValueError:
+                        pass
+                digits = "".join([c for c in channel_id if c.isdigit()])
+                if digits:
+                    return int(digits)
+            return channel_id
+
+        channel_to_index = {}
+        for idx, ch in enumerate(psth.channels):
+            channel_to_index[ch] = idx
+            normalized = _normalize_channel_id(ch)
+            if normalized != ch:
+                channel_to_index[normalized] = idx
+
+        _, axes = plt.subplots(8, 8, figsize=(8, 8))
+        plt.subplots_adjust(wspace=0.1, hspace=0.1)
+
+        for ax in axes.flat:
+            ax.axis("off")
+
+        for ch, lab in zip(self.ch_ids, self.electrode_labels):
+            lab = int(lab)
+            col = lab // 10 - 1
+            row = lab % 10 - 1
+            ax = axes[row, col]
+
+            psth_idx = None
+            if ch in channel_to_index:
+                psth_idx = channel_to_index[ch]
+            else:
+                normalized = _normalize_channel_id(ch)
+                psth_idx = channel_to_index.get(normalized, None)
+
+            if psth_idx is not None:
+                y = values[psth_idx]
+                ax.plot(psth.t, y, lw=0.8, color="C0")
+                ax.axvline(0.0, linestyle="--", alpha=0.6)
+                ax.set_xlim(float(psth.t[0]), float(psth.t[-1]))
+                if y.size:
+                    y_min = 0
+                    y_max = float(np.max(y))+0.2*float(np.max(y))
+                    print(y_min, y_max)
+                    ax.set_ylim(y_min, y_max)
+                ax.axis("off")
+
+            ax.set_title(lab, fontsize=6)
 
         if show:
             plt.show()
@@ -1225,3 +1443,113 @@ class MCSData(EData):
             except Exception:
                 pass
         return r
+    
+    def frame_slice(self, start_frame: int, end_frame: int) -> si.BaseRecording:
+        """
+        Get a slice of the recording between specified frame indices.
+
+        Parameters
+        ----------
+        start_frame : int
+            Starting frame index (inclusive).
+        end_frame : int
+            Ending frame index (exclusive).
+
+        Returns
+        -------
+        spikeinterface.BaseRecording
+            Sliced recording object.
+
+        Raises
+        ------
+        ValueError
+            If recording is not loaded or if frame indices are invalid.
+        """
+        if self.recording is None:
+            raise ValueError("Recording not loaded.")
+        if start_frame < 0 or end_frame <= start_frame:
+            raise ValueError("Invalid start/end frame indices.")
+        
+        return self.recording.frame_slice(start_frame, end_frame)
+    
+    def split_mcs_data(self, split_times: list[float]):
+        """
+        Split the MCSData object into multiple MCSData objects based on split times.
+        
+        split_times: list of float
+            List of split times in seconds. The recording will be split at these times.
+        
+        returns: list of MCSData
+            List of MCSData objects corresponding to the split segments.        
+        """
+
+        if self.recording is None:
+            raise ValueError("Recording not loaded.")
+        if self.fsample is None:
+            raise ValueError("Sampling frequency not initialized.")
+        if self.time_vector is None:
+            raise ValueError("Time vector not initialized.")
+
+        split_samples = [int(t * float(self.fsample)) for t in split_times]
+        split_samples = [0] + split_samples + [len(self.time_vector)]
+        split_samples = sorted(set(split_samples))
+
+        from .Triggers import Triggers
+
+        segments = []
+        segment_start_time = 0.0
+        for i in range(len(split_samples) - 1):
+            start_sample = split_samples[i]
+            end_sample = split_samples[i + 1]
+            segment_duration = end_sample - start_sample
+            segment_start_time = float(start_sample) / float(self.fsample)
+            segment_end_time = float(end_sample) / float(self.fsample)
+
+            segment_recording = self.recording.frame_slice(start_sample, end_sample)
+            segment_time_vector = np.arange(segment_duration) / float(self.fsample)
+
+            segment_data = MCSData.from_recording(
+                recording=segment_recording,
+                fname=self.fname,
+                fsample=self.fsample,
+                time_vector=segment_time_vector,
+                mask=self.mask.copy() if self.mask is not None else None,
+            )
+            segment_data.temporal_mask = (
+                self.temporal_mask[start_sample:end_sample].copy()
+                if self.temporal_mask is not None
+                else np.ones(segment_duration, dtype=bool)
+            )
+            segment_data.excluded_intervals = []
+            for a, b in self.excluded_intervals:
+                if b <= segment_start_time or a >= segment_end_time:
+                    continue
+                segment_data.excluded_intervals.append(
+                    (max(0.0, a - segment_start_time), max(0.0, b - segment_start_time))
+                )
+
+            if self.triggers is not None:
+                segment_data.triggers = Triggers(slots=[])
+                for slot in self.triggers.slots:
+                    if slot.end <= segment_start_time or slot.start >= segment_end_time:
+                        continue
+                    segment_data.triggers.add_interval_slot(
+                        start=max(0.0, slot.start - segment_start_time),
+                        end=max(0.0, slot.end - segment_start_time),
+                        ID=getattr(slot, "ID", None),
+                        description=getattr(slot, "description", None),
+                        blank=getattr(slot, "blank", None),
+                    )
+                segment_data.triggers.sort_slots()
+
+            segment_data.history = list(self.history)
+            segment_data.artifact_removal_status = self.artifact_removal_status
+            segment_data.probe = self.probe
+            segment_data.probe_positions = self.probe_positions
+            segment_data.probe_contact_shape = self.probe_contact_shape
+            segment_data.probe_shape_params = self.probe_shape_params
+            segment_data.probe_ndims = self.probe_ndims
+
+            segments.append(segment_data)
+
+        return segments
