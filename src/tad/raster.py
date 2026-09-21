@@ -1321,6 +1321,8 @@ class Raster:
         sort_channels: bool = True,
         show: bool = False,
         plot_triggers: bool = False,
+        plot_spike_count: bool = False,
+        spike_count: Optional[np.ndarray] = None,
         trigger_color: str = "red",
         trigger_alpha: float = 0.5,
         trigger_linewidth: float = 2.0,
@@ -1426,6 +1428,15 @@ class Raster:
         ax.set_yticks(y_positions)
         ax.set_yticklabels([str(ch) for ch in ch_list])
         ax.set_ylabel("Channel")
+        if plot_spike_count:
+            if spike_count is None:
+                raise ValueError("spike_count must be provided when plot_spike_count=True")
+
+            ax_spike = ax.twinx()
+            ax_spike.set_ylim(ax.get_ylim())
+            ax_spike.set_yticks(y_positions)
+            ax_spike.set_yticklabels([str(count) for count in spike_count])
+            ax_spike.set_ylabel("Spike count")
         ax.set_xlabel("Time")
         ax.set_title("Raster")
 

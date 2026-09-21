@@ -210,11 +210,11 @@ def plot_PSTH_and_raster(
         
         
         for ch in psth.channels:
-            fig = plt.figure(figsize = (16, 8))
-            spec = gridspec.GridSpec(ncols=1, nrows = 4)
+            fig = plt.figure(figsize = (2, 3))
+            spec = gridspec.GridSpec(ncols=1, nrows = 3)
 
-            ax_raster = fig.add_subplot(spec[0:3, 0])
-            ax_psth = fig.add_subplot(spec[3, 0])
+            ax_raster = fig.add_subplot(spec[0:1, 0])
+            ax_psth = fig.add_subplot(spec[1:3, 0])
             #print(f"Plotting channel {ch}...")
             #print(channel_to_index)
             if ch in channel_to_index:
@@ -224,7 +224,8 @@ def plot_PSTH_and_raster(
                 psth_idx = channel_to_index.get(normalized, None)
             if psth_idx is not None:
                 y = values[psth_idx]
-                ax_psth.plot(psth.t, y, lw=0.8, color="C0")
+                ax_psth.plot(psth.t, y, lw=0.8, color=(0.46,0,0))
+                ax_psth.scatter(psth.t, y, s=1, color=(0.46,0,0))
                 ax_psth.axvline(0.0, linestyle="--", alpha=0.6)
                 ax_psth.set_xlim(float(psth.t[0]), float(psth.t[-1]))
                 if y.size:
@@ -232,7 +233,10 @@ def plot_PSTH_and_raster(
                     y_max = float(np.max(y))+0.2*float(np.max(y))
                     #print(y_min, y_max)
                     ax_psth.set_ylim(y_min, y_max)
-                ax_psth.axis("off")
+                ax_psth.spines['top'].set_visible(False)
+                ax_psth.spines['right'].set_visible(False)
+                ax_psth.tick_params(labelbottom=False, labelleft=False)
+                #ax_psth.axis("off")
 
             #ax_psth.set_title(lab, fontsize=6)
             #print(ch)
@@ -246,17 +250,18 @@ def plot_PSTH_and_raster(
                 raster_idxs = np.where((raster_ch >= t) & (raster_ch <= t + float(psth.t[-1])))[0]
                 raster = raster_ch[raster_idxs] - t
                 if raster.size > 0:
-                    ax_raster.scatter(raster, i* np.ones(len(raster)), s=1, color="black")
-            ax_raster.set_xlabel("Time from stimulus (s)")
-            ax_raster.set_ylabel("Stimulation event")
-            ax_raster.set_title("Raster plot")
+                    ax_raster.scatter(raster, i* np.ones(len(raster)), s=10, color=(0.46,0,0), marker="|")
+                ax_raster.axis("off")
+           # ax_raster.set_xlabel("Time from stimulus (s)")
+           # ax_raster.set_ylabel("Stimulation event")
+           # ax_raster.set_title("Raster plot")
             ax_raster.axvline(0.0, linestyle="--", alpha=0.6)
             ax_raster.set_xlim(float(psth.t[0]), float(psth.t[-1]))
             #ax_raster.set_ylim(float(self.electrode_labels.min())-1, float(self.electrode_labels.max())+1)
             #ax_raster.set_yticks(self.electrode_labels)
         # ax_raster.set_yticklabels(self.electrode_labels, fontsize=6)
             # show the plot for each channel:
-            ax_psth.set_title(f"Channel {ch}", fontsize=6)
+            #ax_psth.set_title(f"Channel {ch}", fontsize=6)
             plt.tight_layout()
             plt.show()
         return 1

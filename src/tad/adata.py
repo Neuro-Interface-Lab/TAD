@@ -235,6 +235,7 @@ class AData(ABC):
         """
         path = Path(fname)
         suffix = path.suffix.lower()
+        print(path)
 
         if suffix == ".csv":
             channel_ids: List[Any] = []

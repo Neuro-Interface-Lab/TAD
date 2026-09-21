@@ -487,10 +487,17 @@ class MCSData(EData):
         """
 
         filename = path + "/" + fname
+        traces = self.traces
+        timestamp = self.time_vector
+        channels = self.channel_ids
 
         with h5py.File(filename, "w") as f:
-            f.require_group(h5_group+str(stream_id))
+            g_stream = f.require_group(h5_group+str(stream_id))
+            g_stream.create_dataset("ChannelData", data = traces)
+            g_stream.create_dataset("ChannelDataTimeStamps", data = timestamp)
+            g_stream.create_dataset("InfoChannel", data = channels)
             
+
 
     # -----------------------------------------------------------------
     # Backward-compatible wrappers for AData methods
@@ -597,6 +604,7 @@ class MCSData(EData):
         tmin: float = 0,
         tmax: float = 10,
         n_subsample: Optional[int] = None,
+        return_in_uV: bool = True,
         show: bool = True,
     ) -> int:
         """
@@ -644,7 +652,7 @@ class MCSData(EData):
                 start_frame=int(tmin * float(self.fsample)),
                 end_frame=int(tmax * float(self.fsample)),
                 channel_ids=[ch],
-                return_in_uV=True,
+                return_in_uV=return_in_uV,
             )
             local_time_vector = np.arange(traces.shape[0]) / float(self.fsample) + tmin
 
@@ -743,32 +751,44 @@ class MCSData(EData):
         plt.subplots_adjust(wspace=0.1, hspace=0.1)
 
         for ax in axes.flat:
-            ax.axis("off")
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.tick_params(labelbottom=False, labelleft=False)
 
-        for ch, lab in zip(self.ch_ids, self.electrode_labels):
+        #print(self.electrode_labels)
+        # get electrode labels from 1 to 64 using psth.channels array
+        self.electrode_labels = [int(ch.replace("Ch", "")) for ch in psth.channels]
+        y_max = 0.1
+        for ch, lab in zip(psth.channels, self.electrode_labels):
             lab = int(lab)
             col = lab // 10 - 1
             row = lab % 10 - 1
+            #print(ch, lab, col, row)
             ax = axes[row, col]
+            
 
             psth_idx = None
+            #print(ch, channel_to_index)
             if ch in channel_to_index:
                 psth_idx = channel_to_index[ch]
             else:
                 normalized = _normalize_channel_id(ch)
+                #print(normalized, channel_to_index)
                 psth_idx = channel_to_index.get(normalized, None)
-
+            #print(psth_idx)
             if psth_idx is not None:
                 y = values[psth_idx]
-                ax.plot(psth.t, y, lw=0.8, color="C0")
+                ax.plot(psth.t, y, lw=0.8, color="black")
+                ax.scatter(psth.t, y, s=1, color="black")
                 ax.axvline(0.0, linestyle="--", alpha=0.6)
                 ax.set_xlim(float(psth.t[0]), float(psth.t[-1]))
                 if y.size:
                     y_min = 0
-                    y_max = float(np.max(y))+0.2*float(np.max(y))
-                    print(y_min, y_max)
+                    y_max = max(max(y), y_max)
+                    #print(y_min, y_max)
                     ax.set_ylim(y_min, y_max)
-                ax.axis("off")
+                ax.spines['top'].set_visible(False)
+                ax.spines['right'].set_visible(False)
 
             ax.set_title(lab, fontsize=6)
 
@@ -905,7 +925,7 @@ class MCSData(EData):
         return self.recording.get_probe() if self.recording is not None else None
 
     @tracked_operation("choose_mask")
-    def choose_mask(self, tmin: float = 0, tmax: float = 10, show: bool = True) -> None:
+    def choose_mask(self, tmin: float = 0, tmax: float = 10, show: bool = True, return_in_uV: bool = True) -> None:
         """
         Open a GUI to select channels to include (updates `self.mask`).
 
@@ -970,7 +990,7 @@ class MCSData(EData):
                 start_frame=int(tmin * float(self.fsample)),
                 end_frame=int(tmax * float(self.fsample)),
                 channel_ids=[ch],
-                return_in_uV=True,
+                return_in_uV=return_in_uV,
             )
             local_time_vector = np.arange(traces.shape[0]) / float(self.fsample) + tmin
 
@@ -1153,7 +1173,7 @@ class MCSData(EData):
         """
         if self.time_vector is None:
             raise ValueError("Time vector not initialized.")
-        if self.digital_recording is None:
+        if method == "digital_trigger" and self.digital_recording is None:
             raise ValueError(
                 "Digital recording not loaded. Set load_digital=True when constructing MCSData."
             )
@@ -1249,17 +1269,23 @@ class MCSData(EData):
 
             stim_status = np.zeros_like(moving_avg, dtype=np.int64)
             stim_status[stim_on] = 1
+            # plt.plot(self.time_vector[0:len(stim_status)], stim_status)
+            # plt.show()
 
 
             rising_edges = np.flatnonzero(np.diff(stim_status) == 1) + window
             if method == "artifact":
-                print(method)
+                last_trigger_time = -np.inf
                 falling_edges = np.flatnonzero(np.diff(stim_status) == -1) + window
                 for start_idx, end_idx in zip(rising_edges, falling_edges):
+                    start_time = float((start_frame + start_idx) / float(self.fsample))
+                    if start_time - last_trigger_time < refractory_trigger_period:
+                        continue
                     self.triggers.add_interval_slot(
                         start=float((start_frame + start_idx) / float(self.fsample)),
                         end=float((start_frame + end_idx) / float(self.fsample)),
                     )
+                    last_trigger_time = start_time
             else:
                 last_trigger_time = -np.inf
                 for start_idx in rising_edges:
@@ -1361,7 +1387,9 @@ class MCSData(EData):
                    tstart: Optional[float] = None,
                    tstop: Optional[float] = None,
                    include_amplitudes: bool = False, 
-                   include_triggers: bool = False):
+                   include_triggers: bool = False,
+                   return_amplitudes_in_uV: bool = False):
+                    
         """
         Export a Raster object using detected peaks and current selection.
 
@@ -1426,7 +1454,7 @@ class MCSData(EData):
                         start_frame=start,
                         end_frame=end,
                         channel_ids=[ch],
-                        return_in_uV=True,
+                        return_in_uV=return_amplitudes_in_uV,
                     ).flatten()
                     amplitudes[ch] = trace[kept_samples - start]
                 else:

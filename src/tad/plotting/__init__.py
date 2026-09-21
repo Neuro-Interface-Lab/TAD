@@ -2,6 +2,7 @@ from .rates import plot_firing_rate_stack, plot_firing_rate_heatmap
 from .burst import plot_bursts_spans, plot_bursts_on_raster
 from .isi import plot_logisih_threshold
 from .psth import plot_psth_lines, plot_psth_lines_pooled, plot_psth_heatmap
+from .spike_propagation import plot_spike_gif
 
 __all__ = [
     "plot_firing_rate_stack",
@@ -12,4 +13,5 @@ __all__ = [
     "plot_psth_lines",
     "plot_psth_lines_pooled",
     "plot_psth_heatmap",
+    "plot_spike_propagation_gif",
 ]

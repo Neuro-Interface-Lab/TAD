@@ -17,5 +17,12 @@
   "black-formatter.args": [
     "--line-length",
     "120"
+  ],
+  "python-envs.pythonProjects": [
+    {
+      "path": ".",
+      "envManager": "ms-python.python:conda",
+      "packageManager": "ms-python.python:conda"
+    }
   ]
 }

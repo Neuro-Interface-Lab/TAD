@@ -7,7 +7,10 @@ import numpy as np
 from tad.raster import Raster, ChannelId
 
 
-def _select_channels(r: Raster, channels: Optional[Sequence[ChannelId]]) -> List[ChannelId]:
+def _select_channels(r: Raster, 
+                     channels: Optional[Sequence[ChannelId]], 
+                     sort_channels: bool = False
+                     ) -> List[ChannelId]:
     """
     Select a channel list for computations.
 
@@ -24,6 +27,12 @@ def _select_channels(r: Raster, channels: Optional[Sequence[ChannelId]]) -> List
         Channel IDs in the order that will be used.
     """
     ch_list = list(channels) if channels is not None else r.channels()
+
+    if sort_channels:
+        try:
+            ch_list = sorted(ch_list)
+        except TypeError:
+            pass
     for ch in ch_list:
         r._require_channel(ch)
     return ch_list

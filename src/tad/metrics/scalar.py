@@ -16,6 +16,7 @@ def spike_count(
     tstop: Optional[float] = None,
     inclusive_stop: bool = False,
     per_channel: bool = True,
+    sort_channels: bool = False,
 ) -> Union[int, np.ndarray]:
     """
     Count spikes in a window.
@@ -35,15 +36,16 @@ def spike_count(
         If False, use [tstart, tstop); if True, use [tstart, tstop].
     per_channel
         If True, return an array of counts per channel; otherwise return total count.
+    sort_channels
+        If True, when per_channel is also True, sorts the channels by a given order
 
     Returns
     -------
     counts : ndarray or int
         Spike counts per channel (shape (n_channels,)) or pooled total count.
     """
-    ch_list = _select_channels(r, channels)
+    ch_list = _select_channels(r, channels, sort_channels=sort_channels)
     tstart_f, tstop_f = _infer_window(r, ch_list, tstart, tstop)
-
     counts = np.zeros(len(ch_list), dtype=np.int64)
     for i, ch in enumerate(ch_list):
         arr = r.events[ch]
@@ -52,7 +54,6 @@ def spike_count(
         left = np.searchsorted(arr, tstart_f, side="left")
         right = np.searchsorted(arr, tstop_f, side=("right" if inclusive_stop else "left"))
         counts[i] = right - left
-
     if per_channel:
         return counts
     return int(counts.sum())
@@ -165,10 +166,11 @@ def mean_firing_rate_across_channels(
         thr = float(active_threshold_hz)
         mask = fr >= thr
         if not np.any(mask):
-            raise ValueError("No channels remain after applying active_threshold_hz.")
+            # flag without crashing
+            return 0.0
         fr = fr[mask]
 
-    return float(np.mean(fr)) if fr.size else 0.0
+    return (float(np.mean(fr)), mask) if fr.size else (0.0,[])
 
 
 def mean_inter_event_interval(
