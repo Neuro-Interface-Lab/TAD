@@ -170,7 +170,7 @@ def bin_spike_trains(events, tstart, tstop, binsize):
     for i, channel in enumerate(channels):
         spikes = events[channel]
 
-        time_series[i], = np.histogram(
+        time_series[i], _ = np.histogram(
             spikes,
             bins=bins
         )

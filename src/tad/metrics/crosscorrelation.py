@@ -1,10 +1,10 @@
 from __future__ import annotations
 import numpy as np
 
-from tad.metrics.correlation import CrossCorrelationResult
+from tad.metrics.correlation import CorrelationResult
 
 
-def compute_crosscorrelation(raster, tstart: float = 0, tstop: float = None, taumax: float = None, fsample: float = None,binsize: float = None) -> CrossCorrelationResult:
+def compute_crosscorrelation(raster, tstart: float = 0, tstop: float = None, taumax: float = None, fsample: float = None,binsize: float = None) -> CorrelationResult:
     """
     This function receives a raster object between tstart and tstop, and computes the cross-correlation between all pairs of electrodes in the raster object. The function returns a CrossCorrelationResult dataclass containing the cross-correlation matrix, the tau matrix, and additional information about the analysis.
 
@@ -72,7 +72,7 @@ def compute_crosscorrelation(raster, tstart: float = 0, tstop: float = None, tau
         "tstop": tstop
     }
 
-    return CrossCorrelationResult(
+    return CorrelationResult(
         correlation=cross_correlation,
         tau = tau,
         channels = channels,
