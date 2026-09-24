@@ -21,6 +21,8 @@ def plot_spike_gif(r : Raster,
                    save_path = None,
                    show = False,
                    fps = 10,
+                   mask= None, #TO ADD COLORS TO NON-RECORDING ELECTRODES
+                   stimulation_mask = None, # ADD COLOR TO STIM TYPE
                    ) -> ArtistAnimation:
     ch_ids = r.channels()
 

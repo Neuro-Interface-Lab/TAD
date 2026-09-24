@@ -136,3 +136,43 @@ def pooled_spike_times(
     out = np.concatenate(times).astype(r.dtype, copy=False)
     out.sort()
     return out
+
+def bin_spike_trains(events, tstart, tstop, binsize):
+    """
+    Convert spike timings into binned spike-count time series.
+
+    Parameters
+    ----------
+    events : dict
+        {ChannelId: spike_times}
+    tstart, tstop : float
+        Time interval.
+    binsize : float
+        Bin width in seconds.
+
+    Returns
+    -------
+    channels : list
+        Channel IDs.
+    time_series : np.ndarray
+        Shape (n_channels, n_bins).
+    """
+
+    channels = list(events.keys())
+
+    bins = np.arange(tstart, tstop + binsize, binsize)
+
+    time_series = np.zeros(
+        (len(channels), len(bins) - 1),
+        dtype=float
+    )
+
+    for i, channel in enumerate(channels):
+        spikes = events[channel]
+
+        time_series[i], = np.histogram(
+            spikes,
+            bins=bins
+        )
+
+    return channels, bins, time_series

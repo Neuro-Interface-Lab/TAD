@@ -29,6 +29,7 @@ from .hilbert_firingrates import (
     phase_locking_value_firing_rate,
     kuramoto_order_firing_rate,
 )
+from .correlation import CorrelationResult
 
 # from .utils import _select_channels, _infer_window, pooled_spike_times
 
