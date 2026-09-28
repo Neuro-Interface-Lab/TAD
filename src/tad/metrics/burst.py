@@ -115,6 +115,25 @@ class BurstDetectionResult:
     tstop: float
     channels: List[ChannelId]
 
+@dataclass(frozen=True)
+class NetworkBurstDetectionResult:
+    """
+    Result of method of detecting global activity bursts across all channels.
+    
+    Parameters
+
+    ----------
+    burst_start
+        time of the first spike of the burst
+    burst_end
+        time of the last spike of the burst
+    initial_channel
+        Channel ID of the first spike in the network burst.
+    """
+    burst_start: list[float]
+    burst_end: list[float]
+    initial_channel: list[str]
+
 
 def _detect_bursts_from_times(
     times: np.ndarray,
@@ -180,6 +199,119 @@ def _detect_bursts_from_times(
 
     return bursts
 
+@dataclass
+class NetworkActivity:
+    """
+    A dataclass that stores the activity of the network A= N_{active}/N_{channels} for each timewindow in the binned activity
+    of the network
+    """
+    activity: np.ndarray
+    time_windows: np.ndarray
+
+def calculate_activity(raster: Raster, tstart: float, tstop: float, binsize: float = 0.010) -> NetworkActivity:
+    """
+    This function receives a raster object and calculates the activity of the network A= N_{active}/N_{channels} for each timewindow in the binned activity
+    of the network
+
+    Parameters:
+    - raster: A Raster object containing the spike-train data for the analysis.
+    - tstart: The start time (in seconds) of the time-window for the analysis
+    - tstop: The stop time (in seconds) of the time-window for the analysis
+    - binsize: The size of the time window (in seconds) to bin the activity of the network.
+
+    Returns:
+    - A NetworkActivity object containing the activity of the network and the corresponding time windows.
+    """
+    if tstop == None:
+        tstop = max(np.max(times) for times in raster.events.values() if len(times)>0)
+
+    # reduce events between tstart and tstop
+    events = {
+            channel_id: times[(times>=tstart) & (times <tstop)] 
+            for channel_id, times in raster.events.items()    
+        }
+
+    events = dict(
+        sorted(
+            events.items(),
+            key = lambda item: int(item[0][2:])
+        )
+    )
+
+    channels = list(events.keys())
+    time_windows = np.arange(tstart, tstop, step=binsize)
+    activity = np.zeros(int((tstop-tstart)/binsize), dtype=np.float64)
+    for i in range(int((tstop-tstart)/binsize)):
+        t_initial = tstart + i*binsize
+        t_final = tstart + (i+1)*binsize
+        active_channels = 0
+        for ch in channels:
+            spike_times = events[ch]
+            if np.any((spike_times >= t_initial) & (spike_times < t_final)):
+                active_channels += 1
+        activity[i] = active_channels/len(channels)
+
+    return NetworkActivity(activity=activity, time_windows=time_windows)
+
+def detect_network_bursts(raster: Raster, tstart: float,
+    tstop: float=None,
+    binsize: float = 0.010,
+    threshold_std: float = 2.0,
+    fsample: float = None,
+    ) -> NetworkBurstDetectionResult:
+    if tstop == None:
+        tstop = max(np.max(times) for times in raster.events.values() if len(times)>0)
+
+    # reduce events between tstart and tstop
+    events = {
+            channel_id: times[(times>=tstart) & (times <tstop)] 
+            for channel_id, times in raster.events.items()    
+        }
+
+    events = dict(
+        sorted(
+            events.items(),
+            key = lambda item: int(item[0][2:])
+        )
+    )
+
+    channels = list(events.keys())
+
+    if fsample == None:
+        fsample = 20000 # Hz
+
+    if binsize == None:
+        binsize =200*1/fsample # s
+
+    n_electrodes = len(list(events.keys()))
+    activity = calculate_activity(raster, tstart, tstop, binsize=binsize)
+    mean_activity = np.mean(activity.activity)
+    std_activity = np.std(activity.activity)
+    Amin = mean_activity + threshold_std*std_activity
+    above_threshold_indices = np.where(activity.activity > Amin)[0]
+    breaks = np.where(np.diff(above_threshold_indices) > 1)[0]
+    starts = np.r_[above_threshold_indices[0], above_threshold_indices[breaks + 1]]
+    ends = np.r_[above_threshold_indices[breaks], above_threshold_indices[-1]]
+    tstart = activity.time_windows[starts]
+    tend = activity.time_windows[ends] + binsize
+    initial_channels = []
+    for start, end in zip(tstart, tend):
+        active_channels = []
+        for ch in channels:
+            spike_times = events[ch]
+            if np.any((spike_times >= start) & (spike_times < end)):
+                active_channels.append(ch)
+        if len(active_channels) > 0:
+            first_spike_time = min([np.min(events[ch][(events[ch] >= start) & (events[ch] < end)]) for ch in active_channels])
+            first_spike_channel = [ch for ch in active_channels if np.min(events[ch][(events[ch] >= start) & (events[ch] < end)]) == first_spike_time][0]
+            initial_channels.append(first_spike_channel)
+        else:
+            initial_channels.append(None)
+    return NetworkBurstDetectionResult(
+        burst_start=tstart,
+        burst_end=tend,
+        initial_channel=initial_channels
+    )
 
 def choose_isi_threshold_logisih(
     isi_values: Optional[np.ndarray] = None,
