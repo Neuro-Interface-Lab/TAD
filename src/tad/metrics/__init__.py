@@ -10,7 +10,7 @@ from .rates import firing_rate_curve, FiringRateCurveResult
 from .isi import isi, isih, ISIResult
 from .powerlaw import fit_avalanche_powerlaw, PowerLawFitResult
 from .synchrony import PearsonSynchronyResult, pearson_corr_firing_rate
-from .burst import Burst, BurstChannelResult, BurstDetectionResult, detect_bursts
+from .burst import Burst, BurstChannelResult, BurstPooledResult, BurstDetectionResult, detect_bursts
 from .psth import compute_psth, PSTHResult
 from .evoked import EvokedPeakResult, evoked_peak_metrics, response_probability
 from .spectral_firingrates import (
@@ -51,6 +51,7 @@ __all__ = [
     "pearson_corr_firing_rate",
     "Burst",
     "BurstChannelResult",
+    "BurstPooledResult",
     "BurstDetectionResult",
     "detect_bursts",
     "compute_psth",

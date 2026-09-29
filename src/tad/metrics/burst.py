@@ -21,6 +21,8 @@ class Burst:
         Burst start time (time of first spike in burst).
     end
         Burst end time (time of last spike in burst).
+    initial_channel
+        Channel where the first spike of the burst was detected
     n_spikes
         Number of spikes in the burst.
     duration
@@ -31,6 +33,7 @@ class Burst:
     """
     start: float
     end: float
+    initial_channel: ChannelId
     n_spikes: int
     duration: float
     intra_rate_hz: float
@@ -94,6 +97,15 @@ class BurstChannelResult:
 
 
 @dataclass(frozen=True)
+class BurstPooledResult:
+    """Bursts detected from the merged spike train of selected channels."""
+
+    isi_th: float
+    bursts: List[Burst]
+    diagnostics: Optional[LogISIThresholdDiagnostics] = None
+
+
+@dataclass(frozen=True)
 class BurstDetectionResult:
     """
     Burst detection result across channels.
@@ -108,12 +120,19 @@ class BurstDetectionResult:
         Time window used for detection.
     channels
         Channel IDs included (order).
+    detection_scope
+        Whether bursts were detected separately for each channel or from the pooled
+        spike train.
+    pooled
+        Pooled result, set only when detection_scope="pooled".
     """
     per_channel: Dict[ChannelId, BurstChannelResult]
     method: str
     tstart: float
     tstop: float
     channels: List[ChannelId]
+    detection_scope: Literal["per_channel", "pooled"] = "per_channel"
+    pooled: Optional[BurstPooledResult] = None
 
 @dataclass(frozen=True)
 class NetworkBurstDetectionResult:
@@ -140,6 +159,7 @@ def _detect_bursts_from_times(
     *,
     isi_th: float,
     min_spikes: int = 3,
+    channel_ids: Sequence[ChannelId],
 ) -> List[Burst]:
     """
     Detect bursts from sorted spike times using a fixed ISI threshold rule.
@@ -193,7 +213,16 @@ def _detect_bursts_from_times(
             end = float(t[end_idx])
             dur = float(end - start)
             intra = float((nsp - 1) / dur) if dur > 0.0 else float("inf")
-            bursts.append(Burst(start=start, end=end, n_spikes=int(nsp), duration=dur, intra_rate_hz=intra))
+            bursts.append(
+                Burst(
+                    start=start,
+                    end=end,
+                    initial_channel=channel_ids[start_idx],
+                    n_spikes=int(nsp),
+                    duration=dur,
+                    intra_rate_hz=intra,
+                )
+            )
 
         i = end_idx
 
@@ -208,7 +237,7 @@ class NetworkActivity:
     activity: np.ndarray
     time_windows: np.ndarray
 
-def calculate_activity(raster: Raster, tstart: float, tstop: float, binsize: float = 0.010) -> NetworkActivity:
+def calculate_activity(raster: Raster, tstart: float, tstop: float = None, binsize: float = 0.010) -> NetworkActivity:
     """
     This function receives a raster object and calculates the activity of the network A= N_{active}/N_{channels} for each timewindow in the binned activity
     of the network
@@ -557,13 +586,15 @@ def detect_bursts(
     tstart: Optional[float] = None,
     tstop: Optional[float] = None,
     inclusive_stop: bool = False,
+    detection_scope: Literal["per_channel", "pooled"] = "per_channel",
     threshold_scope: Literal["per_channel", "pooled"] = "per_channel",
     logisih_bins: str | int = "auto",
     logisih_smooth_window: str | int = "from_bins",
     fallback: float = 0.1,
 ) -> BurstDetectionResult:
     """
-    Detect single-channel bursts in a Raster.
+    Detect bursts in a Raster, either independently per channel or on the pooled
+    spike train of selected channels.
 
     Three threshold-selection methods are supported:
 
@@ -577,8 +608,8 @@ def detect_bursts(
     
     3) method="fixed_from_logisih"
         Uses pre-calculated ISI thresholds from log-ISIH analysis.
-        For this method, `isi_th` must be an array with one threshold value per channel
-        in the same order as `channels`.
+        For per-channel detection, `isi_th` must contain one value per channel in the
+        same order as `channels`. For pooled detection, pass one scalar threshold.
 
     Burst definition (segmentation):
     A burst is a maximal consecutive sequence of spikes such that every consecutive
@@ -593,7 +624,8 @@ def detect_bursts(
         Threshold selection method: "fixed", "logisih", or "fixed_from_logisih".
     isi_th
         ISI threshold(s) in seconds. For "fixed" and "logisih", a single float.
-        For "fixed_from_logisih", an array of floats with one per channel.
+        For "fixed_from_logisih", one value per channel in per-channel mode, or one
+        scalar value in pooled mode.
     min_spikes
         Minimum number of spikes required to accept a burst.
     channels
@@ -602,10 +634,14 @@ def detect_bursts(
         Optional time window. If None, inferred from data across selected channels.
     inclusive_stop
         If True, include events exactly at tstop; otherwise window is [tstart, tstop).
+    detection_scope
+        "per_channel" detects each channel independently (the default); "pooled"
+        merges spikes across selected channels before burst segmentation.
     threshold_scope
-        Only used when method="logisih":
+        Used when method="logisih" and detection_scope="per_channel":
         - "per_channel": compute a separate ISI_th per channel from that channel's ISIs
         - "pooled": compute a single ISI_th from pooled ISIs across channels and reuse it
+        For pooled detection, the threshold is derived from the merged spike train.
     logisih_bins
         Number of bins in log10(ISI) histogram, or method for numpy.histogram ("auto", "fd", "doane", "sqrt" etc) (method="logisih").
     logisih_smooth_window
@@ -616,9 +652,8 @@ def detect_bursts(
     Returns
     -------
     BurstDetectionResult
-        Per-channel burst lists and metadata. For method="logisih", each channel result
-        includes a `diagnostics` object that can be plotted/inspected; when
-        threshold_scope="pooled", this diagnostic may be shared across channels.
+        Per-channel burst lists, or one pooled result. Each burst records the channel
+        of its first spike. For method="logisih", threshold diagnostics are included.
 
     Raises
     ------
@@ -631,6 +666,9 @@ def detect_bursts(
     if threshold_scope not in ("per_channel", "pooled"):
         raise ValueError("threshold_scope must be 'per_channel' or 'pooled'.")
 
+    if detection_scope not in ("per_channel", "pooled"):
+        raise ValueError("detection_scope must be 'per_channel' or 'pooled'.")
+
     if min_spikes < 2:
         raise ValueError("min_spikes must be >= 2.")
 
@@ -640,11 +678,93 @@ def detect_bursts(
     # Validate isi_th for fixed_from_logisih method
     if method == "fixed_from_logisih":
         isi_th_array = np.asarray(isi_th)
-        if isi_th_array.ndim != 1 or isi_th_array.size != len(ch_list):
+        if detection_scope == "per_channel" and (
+            isi_th_array.ndim != 1 or isi_th_array.size != len(ch_list)
+        ):
             raise ValueError(
                 f"For method='fixed_from_logisih', isi_th must be a 1D array with "
                 f"exactly {len(ch_list)} elements (one per channel), but got shape {isi_th_array.shape}"
             )
+        if detection_scope == "pooled" and not (
+            isi_th_array.ndim == 0 or (isi_th_array.ndim == 1 and isi_th_array.size == 1)
+        ):
+            raise ValueError(
+                "For pooled detection with method='fixed_from_logisih', isi_th must "
+                "be a scalar or a one-element array."
+            )
+
+    if detection_scope == "pooled":
+        pooled_times_parts: List[np.ndarray] = []
+        pooled_channel_ids: List[ChannelId] = []
+        for ch in ch_list:
+            arr = r.events[ch]
+            left = np.searchsorted(arr, tstart_f, side="left")
+            right = np.searchsorted(arr, tstop_f, side=("right" if inclusive_stop else "left"))
+            window_times = arr[left:right]
+            if window_times.size:
+                pooled_times_parts.append(window_times)
+                pooled_channel_ids.extend([ch] * window_times.size)
+
+        if pooled_times_parts:
+            unsorted_times = np.concatenate(pooled_times_parts).astype(np.float64, copy=False)
+            order = np.argsort(unsorted_times, kind="stable")
+            pooled_times = unsorted_times[order]
+            pooled_channel_ids = [pooled_channel_ids[index] for index in order]
+        else:
+            pooled_times = np.asarray([], dtype=np.float64)
+
+        diagnostics: Optional[LogISIThresholdDiagnostics] = None
+        if method == "fixed":
+            pooled_isi_th = float(isi_th)
+        elif method == "fixed_from_logisih":
+            pooled_isi_th = float(np.asarray(isi_th).ravel()[0])
+        else:
+            pooled_isis = (
+                np.diff(pooled_times)
+                if pooled_times.size >= 2
+                else np.asarray([], dtype=np.float64)
+            )
+            diagnostics = choose_isi_threshold_logisih(
+                pooled_isis,
+                bins=logisih_bins,
+                smooth_window=logisih_smooth_window,
+                fallback=fallback,
+            )
+            pooled_isi_th = float(diagnostics.isi_th)
+
+        pooled_bursts = (
+            _detect_bursts_from_times(
+                pooled_times,
+                isi_th=pooled_isi_th,
+                min_spikes=int(min_spikes),
+                channel_ids=pooled_channel_ids,
+            )
+            if np.isfinite(pooled_isi_th)
+            else []
+        )
+        if method == "fixed":
+            method_str = f"fixed_isi_th={float(isi_th)}"
+        elif method == "fixed_from_logisih":
+            method_str = "fixed_from_logisih(pooled_threshold)"
+        else:
+            method_str = (
+                f"logisih(scope=pooled_raster, bins={logisih_bins}, "
+                f"smooth={logisih_smooth_window}, fallback_q={float(fallback)})"
+            )
+
+        return BurstDetectionResult(
+            per_channel={},
+            method=method_str,
+            tstart=float(tstart_f),
+            tstop=float(tstop_f),
+            channels=list(ch_list),
+            detection_scope="pooled",
+            pooled=BurstPooledResult(
+                isi_th=float(pooled_isi_th),
+                bursts=pooled_bursts,
+                diagnostics=diagnostics,
+            ),
+        )
 
     out: Dict[ChannelId, BurstChannelResult] = {}
 
@@ -704,7 +824,12 @@ def detect_bursts(
         if not np.isfinite(isi_th_ch):
             bursts = []
         else:
-            bursts = _detect_bursts_from_times(w, isi_th=isi_th_ch, min_spikes=int(min_spikes))
+            bursts = _detect_bursts_from_times(
+                w,
+                isi_th=isi_th_ch,
+                min_spikes=int(min_spikes),
+                channel_ids=[ch] * w.size,
+            )
 
         out[ch] = BurstChannelResult(channel=ch, isi_th=float(isi_th_ch), bursts=bursts, diagnostics=diag)
 

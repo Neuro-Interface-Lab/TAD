@@ -46,8 +46,9 @@ def compute_crosscorrelation(raster, tstart: float = 0, tstop: float = None, tau
     tau = np.zeros((n_electrodes,n_electrodes), dtype = np.float64)
 
     for i, ch_x in enumerate(events.keys()):
+        #print("evaluating correlation for channel ", ch_x)
         for j, ch_y in enumerate(events.keys()):
-            print(ch_x, ch_y)
+            #print(ch_x, ch_y)
             tau_range = np.arange(0, taumax, step=binsize)
             spike_times_x = events[ch_x]
             Nx = len(spike_times_x)
