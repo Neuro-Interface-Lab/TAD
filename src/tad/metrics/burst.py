@@ -160,6 +160,7 @@ def _detect_bursts_from_times(
     isi_th: float,
     min_spikes: int = 3,
     channel_ids: Sequence[ChannelId],
+    min_average_spikes_per_channel: Optional[float] = None,
 ) -> List[Burst]:
     """
     Detect bursts from sorted spike times using a fixed ISI threshold rule.
@@ -208,7 +209,11 @@ def _detect_bursts_from_times(
         end_idx = j
 
         nsp = end_idx - start_idx + 1
-        if nsp >= min_spikes:
+        burst_active_channels = len(set(channel_ids[start_idx:end_idx + 1]))
+        if nsp >= min_spikes and (
+            min_average_spikes_per_channel is None
+            or nsp / burst_active_channels > min_average_spikes_per_channel
+        ):
             start = float(t[start_idx])
             end = float(t[end_idx])
             dur = float(end - start)
@@ -582,6 +587,7 @@ def detect_bursts(
     method: Literal["fixed", "logisih", "fixed_from_logisih"] = "fixed",
     isi_th: float | np.ndarray = 0.1,
     min_spikes: int = 3,
+    min_average_spikes_per_channel: Optional[float] = None,
     channels: Optional[Sequence[ChannelId]] = None,
     tstart: Optional[float] = None,
     tstop: Optional[float] = None,
@@ -628,6 +634,12 @@ def detect_bursts(
         scalar value in pooled mode.
     min_spikes
         Minimum number of spikes required to accept a burst.
+    min_average_spikes_per_channel
+        Optional minimum average number of spikes per active channel required
+        within a pooled burst. For each candidate burst, the pooled spike count
+        is divided by the number of distinct channels that contribute at least
+        one spike to that burst; this average must be strictly greater than the
+        value. Ignored for per-channel detection.
     channels
         Channels to include. If None, uses all channels in the raster.
     tstart, tstop
@@ -671,6 +683,8 @@ def detect_bursts(
 
     if min_spikes < 2:
         raise ValueError("min_spikes must be >= 2.")
+    if min_average_spikes_per_channel is not None and min_average_spikes_per_channel < 0:
+        raise ValueError("min_average_spikes_per_channel must be >= 0 when specified.")
 
     ch_list = _select_channels(r, channels)
     tstart_f, tstop_f = _infer_window(r, ch_list, tstart, tstop)
@@ -738,6 +752,10 @@ def detect_bursts(
                 isi_th=pooled_isi_th,
                 min_spikes=int(min_spikes),
                 channel_ids=pooled_channel_ids,
+                min_average_spikes_per_channel=(
+                    float(min_average_spikes_per_channel)
+                    if min_average_spikes_per_channel is not None else None
+                ),
             )
             if np.isfinite(pooled_isi_th)
             else []

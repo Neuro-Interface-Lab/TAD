@@ -89,3 +89,27 @@ Utilities
    :undoc-members:
    :show-inheritance:
 
+
+Network Metrics
+---------------
+
+.. automodule:: tad.metrics.network
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Example::
+
+    from tad.metrics import compute_network_metrics
+
+    result = compute_network_metrics(matrix, channels=channel_ids,
+                                     negative_policy="positive")
+    strength = result.node_metrics["strength"]
+    betweenness = result.node_metrics["betweenness"]
+    efficiency = result.global_metrics["global_efficiency"]
+
+For directed matrices, set ``directed=True`` and supply rows as sources and columns
+as targets. TAD's peak cross-correlation result uses the opposite orientation, so
+pass ``correlation.T``. Choose the negative-weight and missing-value policies
+explicitly; the input matrix is never mutated. See the function documentation for
+weight, distance, clustering-normalization, and disconnected-graph conventions.

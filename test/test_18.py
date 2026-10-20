@@ -46,3 +46,45 @@ def test_detect_bursts_from_pooled_channels():
     assert burst.end == 0.04
     assert burst.n_spikes == 5
     assert burst.initial_channel == 1
+
+    # Average is divided by channels that actually spike in the burst, not all
+    # selected channels (including silent channel 3).
+    per_channel_minimum = detect_bursts(
+        raster,
+        method="fixed",
+        isi_th=0.011,
+        min_spikes=5,
+        min_average_spikes_per_channel=3,
+        tstart=0.0,
+        tstop=0.05,
+        detection_scope="pooled",
+    )
+    assert per_channel_minimum.pooled is not None
+    assert per_channel_minimum.pooled.bursts == []
+
+    sufficient_per_channel = detect_bursts(
+        raster,
+        method="fixed",
+        isi_th=0.011,
+        min_spikes=5,
+        min_average_spikes_per_channel=2,
+        tstart=0.0,
+        tstop=0.05,
+        detection_scope="pooled",
+    )
+    assert sufficient_per_channel.pooled is not None
+    assert len(sufficient_per_channel.pooled.bursts) == 1
+
+    raster.insert_timestamparray(3, [], assume_sorted=True)
+    lower_average = detect_bursts(
+        raster,
+        method="fixed",
+        isi_th=0.011,
+        min_spikes=5,
+        min_average_spikes_per_channel=2,
+        tstart=0.0,
+        tstop=0.05,
+        detection_scope="pooled",
+    )
+    assert lower_average.pooled is not None
+    assert len(lower_average.pooled.bursts) == 1

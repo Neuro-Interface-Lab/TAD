@@ -30,10 +30,19 @@ from .hilbert_firingrates import (
     kuramoto_order_firing_rate,
 )
 from .correlation import CorrelationResult
+from .network import NetworkMetricsResult, compute_network_metrics
+from .entropy import ShannonEntropyResult, compute_shannon_entropy
+from .von_neumann import VonNeumannEntropyResult, compute_von_neumann_entropy
 
 # from .utils import _select_channels, _infer_window, pooled_spike_times
 
 __all__ = [
+    "NetworkMetricsResult",
+    "compute_network_metrics",
+    "compute_shannon_entropy",
+    "ShannonEntropyResult",
+    "VonNeumannEntropyResult",
+    "compute_von_neumann_entropy",
     "spike_count",
     "firing_rate",
     "mean_firing_rate_across_channels",
