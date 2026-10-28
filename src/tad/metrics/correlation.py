@@ -16,7 +16,7 @@ class CorrelationResult:
     correlation : np.ndarray
         n x n matrix containing the correlation values.
 
-    tau : np.ndarray
+    tau : np.ndarray or None
         n x n matrix containing the time-lag values corresponding to the correlation values.
 
     channels : list
@@ -28,6 +28,6 @@ class CorrelationResult:
     """
 
     correlation: np.ndarray
-    tau: np.ndarray
+    tau: np.ndarray | None
     channels: list[ChannelId]
     info: dict[str, Any]

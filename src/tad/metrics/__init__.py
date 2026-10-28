@@ -30,6 +30,7 @@ from .hilbert_firingrates import (
     kuramoto_order_firing_rate,
 )
 from .correlation import CorrelationResult
+from .sttc import compute_sttc
 from .network import NetworkMetricsResult, compute_network_metrics
 from .entropy import ShannonEntropyResult, compute_shannon_entropy
 from .von_neumann import VonNeumannEntropyResult, compute_von_neumann_entropy
@@ -39,6 +40,7 @@ from .von_neumann import VonNeumannEntropyResult, compute_von_neumann_entropy
 __all__ = [
     "NetworkMetricsResult",
     "compute_network_metrics",
+    "compute_sttc",
     "compute_shannon_entropy",
     "ShannonEntropyResult",
     "VonNeumannEntropyResult",
